@@ -1,0 +1,62 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gateway-runtime-rebff
+  namespace: gateway-runtime-rebff
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: portal.example.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: portal-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gateway-runtime-rebff
+  namespace: gateway-runtime-rebff
+spec:
+  parentRefs:
+    - name: gateway-runtime-rebff
+  hostnames:
+    - portal.example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /auth
+      backendRefs:
+        - name: gateway-runtime-rebff
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: gateway-runtime-rebff
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gateway-runtime-rebff-health
+  namespace: gateway-runtime-rebff
+spec:
+  parentRefs:
+    - name: gateway-runtime-rebff
+  hostnames:
+    - portal.example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /health
+      backendRefs:
+        - name: gateway-runtime-rebff
+          port: 8080

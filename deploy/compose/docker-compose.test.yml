@@ -1,0 +1,98 @@
+name: gateway-runtime-test
+
+x-runtime: &runtime
+  image: gateway-runtime:v0.1.0
+  build:
+    context: ../..
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  redis:
+    image: redis:8.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "26380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  mock-storage:
+    image: python:3.13-alpine
+    command: ["python", "/app/mock_storage.py"]
+    volumes:
+      - ./mock-storage/mock_storage.py:/app/mock_storage.py:ro
+    ports:
+      - "29012:19002"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:19002/health').read()"
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  rebff:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: rebff
+      BFF_HTTP_ADDR: ":8080"
+      BFF_HTTP_PUBLIC_URL: "http://localhost:28180"
+      BFF_HTTP_BASE_PATH: ""
+      BFF_STORE_BACKEND: redis
+      BFF_REDIS_URL: "redis://redis:6379/0"
+      BFF_REDIS_PREFIX: gateway-runtime-test-rebff
+      BFF_POLICY_PROVIDER: static
+      BFF_METRICS_ENABLED: "true"
+      BFF_AUDIT_ENABLED: "true"
+      BFF_ACCESS_LOG_ENABLED: "true"
+      BFF_TRACE_ENABLED: "true"
+    ports:
+      - "28180:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  storage:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: storage
+      GATEWAY_CAPABILITIES: upload,download,presign,multipart,metadata
+      BFF_HTTP_ADDR: ":8080"
+      STORAGE_SIGNER_BASE_URL: "http://mock-storage:19002"
+      STORAGE_SIGNER_TIMEOUT: 5s
+      STORAGE_PRESIGN_DEFAULT_TTL: 15m
+      STORAGE_PRESIGN_MAX_TTL: 1h
+    ports:
+      - "28182:8080"
+    depends_on:
+      mock-storage:
+        condition: service_healthy
+
+  streaming:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: streaming
+      GATEWAY_CAPABILITIES: playback,manifest,token,origin-select
+      BFF_HTTP_ADDR: ":8080"
+    ports:
+      - "28183:8080"
+
+  websocket:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: websocket
+      GATEWAY_CAPABILITIES: connect,publish,subscribe,presence,heartbeat
+      BFF_HTTP_ADDR: ":8080"
+    ports:
+      - "28184:8080"

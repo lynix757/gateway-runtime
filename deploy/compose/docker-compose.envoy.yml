@@ -1,0 +1,142 @@
+name: gateway-runtime-envoy-test
+
+x-runtime: &runtime
+  image: gateway-runtime:v0.1.0
+  build:
+    context: ../..
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - gateway
+
+services:
+  envoy:
+    image: envoyproxy/envoy:v1.39.1
+    restart: unless-stopped
+    command:
+      - envoy
+      - -c
+      - /etc/envoy/envoy.yaml
+      - --log-level
+      - info
+    ports:
+      - "28080:8080"
+      - "127.0.0.1:29901:9901"
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    depends_on:
+      - rebff
+      - storage
+      - streaming
+      - websocket
+    networks:
+      - gateway
+
+  redis:
+    image: redis:8.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    networks:
+      - gateway
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "29000:9000"
+      - "127.0.0.1:29001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - gateway
+
+  minio-signer:
+    build:
+      context: ./minio-signer
+    image: gateway-runtime-minio-signer:v0.1.0
+    environment:
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin123
+      S3_REGION: us-east-1
+      S3_ENDPOINT_INTERNAL: http://minio:9000
+      S3_ENDPOINT_PUBLIC: http://minio.localhost:29000
+      S3_BOOTSTRAP_BUCKET: assets
+    depends_on:
+      - minio
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:19002/health').read()"
+      interval: 3s
+      timeout: 2s
+      retries: 30
+    networks:
+      - gateway
+
+  rebff:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: rebff
+      BFF_HTTP_ADDR: ":8080"
+      BFF_HTTP_PUBLIC_URL: "http://rebff.localhost:28080"
+      BFF_STORE_BACKEND: redis
+      BFF_REDIS_URL: "redis://redis:6379/0"
+      BFF_REDIS_PREFIX: gateway-runtime-envoy-rebff
+      BFF_POLICY_PROVIDER: static
+      BFF_METRICS_ENABLED: "true"
+      BFF_AUDIT_ENABLED: "true"
+      BFF_ACCESS_LOG_ENABLED: "true"
+      BFF_TRACE_ENABLED: "true"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  storage:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: storage
+      GATEWAY_CAPABILITIES: upload,download,presign,multipart,metadata
+      BFF_HTTP_ADDR: ":8080"
+      STORAGE_SIGNER_BASE_URL: "http://minio-signer:19002"
+      STORAGE_SIGNER_TIMEOUT: 5s
+      STORAGE_PRESIGN_DEFAULT_TTL: 15m
+      STORAGE_PRESIGN_MAX_TTL: 1h
+    depends_on:
+      minio-signer:
+        condition: service_healthy
+
+  streaming:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: streaming
+      GATEWAY_CAPABILITIES: playback,manifest,token,origin-select
+      BFF_HTTP_ADDR: ":8080"
+
+  websocket:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: websocket
+      GATEWAY_CAPABILITIES: connect,publish,subscribe,presence,heartbeat
+      BFF_HTTP_ADDR: ":8080"
+
+volumes:
+  minio-data:
+
+networks:
+  gateway:
+    name: gateway-runtime-envoy-test

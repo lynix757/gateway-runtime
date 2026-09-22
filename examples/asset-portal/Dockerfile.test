@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1.7
+
+FROM golang:1.27.1-bookworm AS build
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+WORKDIR /src/examples/asset-portal
+RUN go mod download
+RUN CGO_ENABLED=0 GOOS=linux GOMAXPROCS=2 go build -p=1 -trimpath -ldflags="-s -w" -o /out/asset-portal ./cmd/asset-portal
+RUN CGO_ENABLED=0 GOOS=linux GOMAXPROCS=2 go build -p=1 -trimpath -ldflags="-s -w" -o /out/mock-services ./cmd/mock-services
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /out/asset-portal /usr/local/bin/asset-portal
+COPY --from=build /out/mock-services /usr/local/bin/mock-services
+
+USER 65532:65532

@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+bin/
+dist/
+tmp/
+.cache/
+coverage.out
+sbom*.json
+*.log
+.DS_Store
+
+*.key
+*.pem
+*.p12
+
+benchmark-results/

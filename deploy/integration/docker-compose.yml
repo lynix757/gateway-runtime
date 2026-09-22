@@ -1,0 +1,28 @@
+services:
+  redis:
+    image: redis:8.2-alpine
+    ports:
+      - "16379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    command:
+      - start-dev
+      - --import-realm
+      - --http-port=8080
+      - --hostname=http://localhost:18081
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      JAVA_OPTS_KC_HEAP: "-Xms128m -Xmx512m"
+      KC_CACHE: local
+    ports:
+      - "18081:8080"
+    volumes:
+      - ./realm-rebff.json:/opt/keycloak/data/import/realm-rebff.json:ro

@@ -1,0 +1,167 @@
+name: gateway-runtime-minio-test
+
+x-runtime: &runtime
+  image: gateway-runtime:v0.1.0
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - gateway
+
+services:
+  envoy:
+    image: envoyproxy/envoy:v1.39.1
+    restart: unless-stopped
+    command:
+      - envoy
+      - -c
+      - /etc/envoy/envoy.yaml
+      - --log-level
+      - info
+    ports:
+      - "38080:8080"
+      - "127.0.0.1:39901:9901"
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    depends_on:
+      - rebff
+      - storage
+      - streaming
+      - websocket
+    networks:
+      - gateway
+
+  redis:
+    image: redis:8.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    networks:
+      - gateway
+
+  minio:
+    image: quay.io/minio/minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "39000:9000"
+      - "127.0.0.1:39001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - gateway
+
+  access-policy:
+    build:
+      context: ./access-policy
+    image: gateway-runtime-access-policy:v0.1.0
+    environment:
+      ACCESS_POLICY_SUBJECT_ROLES: '{"alice":["asset-user"],"auditor":["auditor"],"admin":["archive-admin"]}'
+      ACCESS_POLICY_ROLE_RULES: '{"asset-user":["storage.upload:asset","storage.download:asset","storage.metadata:asset","storage.multipart:asset"],"auditor":["storage.download:audit-evidence","storage.metadata:audit-evidence"],"archive-admin":["storage.download:archive","storage.metadata:archive"]}'
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:19100/health').read()"
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    networks:
+      - gateway
+
+  minio-signer:
+    build:
+      context: ./minio-signer
+    image: gateway-runtime-minio-signer:v0.1.0
+    environment:
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin123
+      S3_REGION: us-east-1
+      S3_ENDPOINT_INTERNAL: http://minio:9000
+      S3_ENDPOINT_PUBLIC: http://minio.localhost:39000
+      S3_BOOTSTRAP_BUCKETS: assets,archive,audit-evidence
+    depends_on:
+      - minio
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:19002/health').read()"
+      interval: 3s
+      timeout: 2s
+      retries: 30
+    networks:
+      - gateway
+
+  rebff:
+    <<: *runtime
+    build:
+      context: ../..
+    environment:
+      GATEWAY_ROLE: rebff
+      BFF_HTTP_ADDR: ":8080"
+      BFF_HTTP_PUBLIC_URL: "http://rebff.localhost:38080"
+      BFF_STORE_BACKEND: redis
+      BFF_REDIS_URL: "redis://redis:6379/0"
+      BFF_REDIS_PREFIX: gateway-runtime-minio-rebff
+      BFF_POLICY_PROVIDER: static
+      BFF_METRICS_ENABLED: "true"
+      BFF_AUDIT_ENABLED: "true"
+      BFF_ACCESS_LOG_ENABLED: "true"
+      BFF_TRACE_ENABLED: "true"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  storage:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: storage
+      GATEWAY_CAPABILITIES: upload,download,presign,multipart,metadata
+      BFF_HTTP_ADDR: ":8080"
+      STORAGE_SIGNER_BASE_URL: "http://minio-signer:19002"
+      STORAGE_SIGNER_TIMEOUT: 5s
+      STORAGE_PRESIGN_DEFAULT_TTL: 15m
+      STORAGE_PRESIGN_MAX_TTL: 1h
+      STORAGE_TARGETS_JSON: '{"asset":{"provider":"minio-main","bucket":"assets"},"archive":{"provider":"minio-main","bucket":"archive","read_only":true},"audit-evidence":{"provider":"minio-main","bucket":"audit-evidence","read_only":true}}'
+      STORAGE_ACCESS_POLICY_URL: "http://access-policy:19100"
+      STORAGE_ACCESS_POLICY_TIMEOUT: 3s
+      STORAGE_SUBJECT_HEADER: "X-Auth-Subject"
+    depends_on:
+      minio-signer:
+        condition: service_healthy
+      access-policy:
+        condition: service_healthy
+
+  streaming:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: streaming
+      GATEWAY_CAPABILITIES: playback,manifest,token,origin-select
+      BFF_HTTP_ADDR: ":8080"
+
+  websocket:
+    <<: *runtime
+    environment:
+      GATEWAY_ROLE: websocket
+      GATEWAY_CAPABILITIES: connect,publish,subscribe,presence,heartbeat
+      BFF_HTTP_ADDR: ":8080"
+
+volumes:
+  minio-data:
+
+networks:
+  gateway:
+    name: gateway-runtime-minio-test

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-runtime-rebff
+  labels:
+    app.kubernetes.io/name: gateway-runtime-rebff
+spec:
+  selector:
+    app.kubernetes.io/name: gateway-runtime-rebff
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

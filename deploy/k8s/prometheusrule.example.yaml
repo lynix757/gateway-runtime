@@ -1,0 +1,72 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rebff
+spec:
+  groups:
+    - name: rebff.operational
+      rules:
+        - alert: ReBFFHighHTTP5xxRatio
+          expr: |
+            (
+              sum(rate(rebff_http_requests_total{status_class="5xx"}[5m]))
+              /
+              clamp_min(sum(rate(rebff_http_requests_total[5m])), 0.001)
+            ) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "rebff HTTP 5xx ratio is above 5%"
+
+        - alert: ReBFFRateLimitRejections
+          expr: |
+            sum(rate(rebff_http_rejected_total{reason="rate_limit"}[5m])) > 5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "rebff is rejecting sustained traffic due to rate limiting"
+
+        - alert: ReBFFAuthRateLimitRejections
+          expr: |
+            sum(rate(rebff_http_rejected_total{reason="auth_rate_limit"}[5m])) > 0.2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "rebff login endpoint is seeing sustained rate-limit rejections"
+
+        - alert: ReBFFConcurrencySaturation
+          expr: |
+            sum(rate(rebff_http_rejected_total{reason="concurrency"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "rebff has sustained concurrency-limit rejections"
+
+        - alert: ReBFFOutboundProtectionActive
+          expr: |
+            sum by (service, reason) (
+              rate(rebff_outbound_rejected_total[5m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "rebff outbound bulkhead or circuit breaker is rejecting requests"
+
+        - alert: ReBFFHighP95Latency
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(rebff_http_request_duration_seconds_bucket[5m])
+              )
+            ) > 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "rebff P95 request latency is above 1 second"

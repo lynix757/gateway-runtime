@@ -1,0 +1,143 @@
+static_resources:
+  listeners:
+    - name: ingress_http
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 8080
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                use_remote_address: true
+                normalize_path: true
+                merge_slashes: true
+                upgrade_configs:
+                  - upgrade_type: websocket
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                route_config:
+                  name: local_vhosts
+                  virtual_hosts:
+                    - name: rebff
+                      domains:
+                        - "rebff.localhost"
+                        - "rebff.localhost:*"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: rebff
+                            timeout: 30s
+
+                    - name: storage
+                      domains:
+                        - "storage.localhost"
+                        - "storage.localhost:*"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: storage
+                            timeout: 30s
+
+                    - name: streaming
+                      domains:
+                        - "stream.localhost"
+                        - "stream.localhost:*"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: streaming
+                            timeout: 30s
+
+                    - name: websocket
+                      domains:
+                        - "ws.localhost"
+                        - "ws.localhost:*"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: websocket
+                            timeout: 0s
+
+                    - name: reject_unknown_host
+                      domains:
+                        - "*"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          direct_response:
+                            status: 404
+                            body:
+                              inline_string: "unknown virtual host\n"
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    - name: rebff
+      type: STRICT_DNS
+      connect_timeout: 3s
+      load_assignment:
+        cluster_name: rebff
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: rebff
+                      port_value: 8080
+
+    - name: storage
+      type: STRICT_DNS
+      connect_timeout: 3s
+      load_assignment:
+        cluster_name: storage
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: storage
+                      port_value: 8080
+
+    - name: streaming
+      type: STRICT_DNS
+      connect_timeout: 3s
+      load_assignment:
+        cluster_name: streaming
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: streaming
+                      port_value: 8080
+
+    - name: websocket
+      type: STRICT_DNS
+      connect_timeout: 3s
+      load_assignment:
+        cluster_name: websocket
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: websocket
+                      port_value: 8080
+
+admin:
+  access_log_path: /dev/stdout
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
