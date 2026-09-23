@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>REBFF OIDC Login Sequence Diagram</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --surface: #f8fafc;
+      --panel: #ffffff;
+      --ink: #14213d;
+      --muted: #5b6475;
+      --border: #cbd5e1;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --success: #047857;
+      --success-soft: #d1fae5;
+      --warning: #b45309;
+      --warning-soft: #fef3c7;
+      --danger: #b91c1c;
+      --danger-soft: #fee2e2;
+      --store: #7c3aed;
+      --store-soft: #ede9fe;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--surface);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1720px; margin: 0 auto; padding: 32px 24px 48px; }
+    header { display: flex; gap: 24px; align-items: end; justify-content: space-between; margin-bottom: 22px; }
+    h1 { margin: 0 0 8px; font-size: clamp(24px, 3vw, 40px); letter-spacing: -0.035em; }
+    .subtitle { margin: 0; color: var(--muted); max-width: 900px; line-height: 1.65; }
+    .badge {
+      flex: 0 0 auto; padding: 8px 12px; border: 1px solid var(--border); border-radius: 999px;
+      background: var(--panel); color: var(--muted); font-size: 13px; font-weight: 700;
+    }
+    .diagram-shell {
+      overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--panel); box-shadow: 0 16px 45px rgba(15, 23, 42, .08);
+    }
+    svg { display: block; width: 1600px; height: auto; min-width: 1600px; }
+    .actor { fill: var(--panel); stroke: var(--border); stroke-width: 1.5; rx: 10; }
+    .actor-primary { fill: var(--accent-soft); stroke: var(--accent); }
+    .actor-store { fill: var(--store-soft); stroke: var(--store); }
+    .actor-idp { fill: var(--success-soft); stroke: var(--success); }
+    .actor-label { fill: var(--ink); font-size: 14px; font-weight: 750; text-anchor: middle; }
+    .actor-detail { fill: var(--muted); font-size: 11px; text-anchor: middle; }
+    .lifeline { stroke: var(--border); stroke-width: 1.2; stroke-dasharray: 6 7; }
+    .activation { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; rx: 3; }
+    .message { stroke: var(--ink); stroke-width: 1.7; fill: none; marker-end: url(#arrow); }
+    .return { stroke: var(--accent); stroke-width: 1.7; stroke-dasharray: 6 5; fill: none; marker-end: url(#arrow-blue); }
+    .store-message { stroke: var(--store); stroke-width: 1.7; fill: none; marker-end: url(#arrow-purple); }
+    .message-label { fill: var(--ink); font-size: 13px; font-weight: 650; text-anchor: middle; }
+    .message-detail { fill: var(--muted); font-size: 11px; text-anchor: middle; }
+    .step { fill: var(--accent); }
+    .step-text { fill: white; font-size: 11px; font-weight: 800; text-anchor: middle; dominant-baseline: middle; }
+    .phase { fill: color-mix(in srgb, var(--accent-soft) 42%, transparent); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 5 5; rx: 10; }
+    .phase-label { fill: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+    .note { fill: var(--warning-soft); stroke: var(--warning); stroke-width: 1; rx: 8; }
+    .note-text { fill: var(--ink); font-size: 11px; font-weight: 600; }
+    .legend { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+    .legend article { padding: 15px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+    .legend strong { display: block; margin-bottom: 5px; font-size: 13px; }
+    .legend span { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; }
+    footer { margin-top: 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #08111f; --panel: #0f1b2d; --ink: #e6edf7; --muted: #a9b4c6;
+        --border: #334155; --accent: #60a5fa; --accent-soft: #172c4c;
+        --success: #34d399; --success-soft: #12382f; --warning: #fbbf24;
+        --warning-soft: #3b2d11; --danger: #f87171; --danger-soft: #3d1c22;
+        --store: #a78bfa; --store-soft: #2d2348;
+      }
+    }
+    @media (max-width: 720px) {
+      main { padding: 20px 12px 32px; }
+      header { align-items: start; flex-direction: column; }
+      .legend { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>REBFF · OIDC Login Sequence</h1>
+      <p class="subtitle">ลำดับการเข้าสู่ระบบด้วย Authorization Code + PKCE ตั้งแต่ Browser เริ่ม Login จนได้รับ opaque session cookie และอ่าน User Context ผ่าน <strong>/api/me</strong></p>
+    </div>
+    <div class="badge">Gateway Runtime · REBFF Role</div>
+  </header>
+
+  <section class="diagram-shell" aria-label="OIDC login sequence diagram">
+    <svg viewBox="0 0 1600 1920" role="img" aria-labelledby="diagram-title diagram-desc">
+      <title id="diagram-title">REBFF OIDC Login Sequence Diagram</title>
+      <desc id="diagram-desc">Sequence diagram showing the user, browser, REBFF, flow store, OIDC provider, session store, token store, and policy evaluator.</desc>
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--ink)"/></marker>
+        <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker>
+        <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--store)"/></marker>
+      </defs>
+
+      <!-- Participants -->
+      <g>
+        <rect class="actor" x="25" y="30" width="150" height="62"/><text class="actor-label" x="100" y="56">ผู้ใช้งาน</text><text class="actor-detail" x="100" y="76">User</text>
+        <rect class="actor" x="215" y="30" width="150" height="62"/><text class="actor-label" x="290" y="56">Browser</text><text class="actor-detail" x="290" y="76">Web Client</text>
+        <rect class="actor actor-primary" x="425" y="30" width="150" height="62"/><text class="actor-label" x="500" y="56">REBFF</text><text class="actor-detail" x="500" y="76">Security Boundary</text>
+        <rect class="actor actor-store" x="635" y="30" width="150" height="62"/><text class="actor-label" x="710" y="56">Flow Store</text><text class="actor-detail" x="710" y="76">Memory / Redis</text>
+        <rect class="actor actor-idp" x="845" y="30" width="150" height="62"/><text class="actor-label" x="920" y="56">OIDC Provider</text><text class="actor-detail" x="920" y="76">Keycloak / IdP</text>
+        <rect class="actor actor-store" x="1055" y="30" width="150" height="62"/><text class="actor-label" x="1130" y="56">Session Store</text><text class="actor-detail" x="1130" y="76">Memory / Redis</text>
+        <rect class="actor actor-store" x="1265" y="30" width="150" height="62"/><text class="actor-label" x="1340" y="56">Token Store</text><text class="actor-detail" x="1340" y="76">Server-side Tokens</text>
+        <rect class="actor" x="1440" y="30" width="135" height="62"/><text class="actor-label" x="1507" y="56">Policy</text><text class="actor-detail" x="1507" y="76">Role Mapping</text>
+      </g>
+
+      <!-- Lifelines -->
+      <g>
+        <line class="lifeline" x1="100" y1="92" x2="100" y2="1860"/><line class="lifeline" x1="290" y1="92" x2="290" y2="1860"/>
+        <line class="lifeline" x1="500" y1="92" x2="500" y2="1860"/><line class="lifeline" x1="710" y1="92" x2="710" y2="1860"/>
+        <line class="lifeline" x1="920" y1="92" x2="920" y2="1860"/><line class="lifeline" x1="1130" y1="92" x2="1130" y2="1860"/>
+        <line class="lifeline" x1="1340" y1="92" x2="1340" y2="1860"/><line class="lifeline" x1="1507" y1="92" x2="1507" y2="1860"/>
+        <rect class="activation" x="493" y="190" width="14" height="1450"/>
+      </g>
+
+      <!-- Phase 1 -->
+      <rect class="phase" x="18" y="118" width="772" height="420"/><text class="phase-label" x="34" y="140">PHASE 1 · เริ่มต้น LOGIN และสร้าง OIDC FLOW</text>
+
+      <g><circle class="step" cx="195" cy="180" r="12"/><text class="step-text" x="195" y="180">1</text><line class="message" x1="108" y1="180" x2="282" y2="180"/><text class="message-label" x="195" y="166">เปิดหน้า Login</text></g>
+      <g><circle class="step" cx="395" cy="240" r="12"/><text class="step-text" x="395" y="240">2</text><line class="message" x1="298" y1="240" x2="492" y2="240"/><text class="message-label" x="395" y="224">GET /auth/login</text><text class="message-detail" x="395" y="260">return_to=/api/me</text></g>
+      <g><circle class="step" cx="590" cy="305" r="12"/><text class="step-text" x="590" y="305">3</text><path class="message" d="M507 305 H590 V335 H510"/><text class="message-label" x="596" y="292">ตรวจ return_to</text><text class="message-detail" x="604" y="324">รับเฉพาะ local path</text></g>
+      <rect class="note" x="278" y="355" width="205" height="52"/><text class="note-text" x="292" y="376">หาก return_to ไม่ถูกต้อง</text><text class="note-text" x="292" y="394">ตอบ 400 invalid login request</text>
+      <g><circle class="step" cx="590" cy="445" r="12"/><text class="step-text" x="590" y="445">4</text><path class="message" d="M507 445 H590 V475 H510"/><text class="message-label" x="602" y="432">สร้าง state + nonce + PKCE</text><text class="message-detail" x="612" y="464">code_challenge = SHA-256(verifier)</text></g>
+      <g><circle class="step" cx="605" cy="510" r="12"/><text class="step-text" x="605" y="510">5</text><line class="store-message" x1="508" y1="510" x2="702" y2="510"/><text class="message-label" x="605" y="494">บันทึก OIDC Flow</text><text class="message-detail" x="605" y="530">TTL เริ่มต้น 5 นาที</text></g>
+
+      <!-- Phase 2 -->
+      <rect class="phase" x="198" y="555" width="805" height="455"/><text class="phase-label" x="214" y="578">PHASE 2 · AUTHENTICATION ที่ IDENTITY PROVIDER</text>
+      <g><circle class="step" cx="395" cy="620" r="12"/><text class="step-text" x="395" y="620">6</text><line class="return" x1="492" y1="620" x2="298" y2="620"/><text class="message-label" x="395" y="604">302 Redirect ไป IdP</text></g>
+      <g><circle class="step" cx="605" cy="685" r="12"/><text class="step-text" x="605" y="685">7</text><line class="message" x1="298" y1="685" x2="912" y2="685"/><text class="message-label" x="605" y="668">GET /authorize</text><text class="message-detail" x="605" y="705">state + nonce + code_challenge (S256)</text></g>
+      <g><circle class="step" cx="605" cy="750" r="12"/><text class="step-text" x="605" y="750">8</text><line class="return" x1="912" y1="750" x2="298" y2="750"/><text class="message-label" x="605" y="734">แสดงหน้า Login</text></g>
+      <g><circle class="step" cx="195" cy="815" r="12"/><text class="step-text" x="195" y="815">9</text><line class="message" x1="108" y1="815" x2="282" y2="815"/><text class="message-label" x="195" y="798">กรอกข้อมูลเข้าสู่ระบบ</text></g>
+      <g><circle class="step" cx="605" cy="880" r="12"/><text class="step-text" x="605" y="880">10</text><line class="message" x1="298" y1="880" x2="912" y2="880"/><text class="message-label" x="605" y="864">ส่งข้อมูลให้ Identity Provider</text></g>
+      <g><circle class="step" cx="1010" cy="945" r="12"/><text class="step-text" x="1010" y="945">11</text><path class="message" d="M927 945 H1010 V975 H930"/><text class="message-label" x="1019" y="932">ตรวจ Credentials / SSO / MFA</text></g>
+
+      <!-- Phase 3 -->
+      <rect class="phase" x="198" y="1030" width="1220" height="650"/><text class="phase-label" x="214" y="1053">PHASE 3 · CALLBACK, TOKEN EXCHANGE และสร้าง SERVER-SIDE SESSION</text>
+      <g><circle class="step" cx="605" cy="1100" r="12"/><text class="step-text" x="605" y="1100">12</text><line class="return" x1="912" y1="1100" x2="298" y2="1100"/><text class="message-label" x="605" y="1084">302 /auth/callback</text><text class="message-detail" x="605" y="1120">state + authorization code</text></g>
+      <g><circle class="step" cx="395" cy="1165" r="12"/><text class="step-text" x="395" y="1165">13</text><line class="message" x1="298" y1="1165" x2="492" y2="1165"/><text class="message-label" x="395" y="1149">GET /auth/callback</text></g>
+      <g><circle class="step" cx="605" cy="1230" r="12"/><text class="step-text" x="605" y="1230">14</text><line class="store-message" x1="508" y1="1230" x2="702" y2="1230"/><text class="message-label" x="605" y="1214">Take(state)</text><text class="message-detail" x="605" y="1250">อ่านครั้งเดียวแล้วลบ ป้องกัน replay</text></g>
+      <g><circle class="step" cx="710" cy="1295" r="12"/><text class="step-text" x="710" y="1295">15</text><line class="message" x1="508" y1="1295" x2="912" y2="1295"/><text class="message-label" x="710" y="1279">แลก Authorization Code</text><text class="message-detail" x="710" y="1315">code + code_verifier + redirect_uri</text></g>
+      <g><circle class="step" cx="710" cy="1360" r="12"/><text class="step-text" x="710" y="1360">16</text><line class="return" x1="912" y1="1360" x2="508" y2="1360"/><text class="message-label" x="710" y="1344">Access + Refresh + ID Token</text></g>
+      <g><circle class="step" cx="615" cy="1425" r="12"/><text class="step-text" x="615" y="1425">17</text><path class="message" d="M507 1425 H615 V1455 H510"/><text class="message-label" x="626" y="1412">ตรวจ ID Token และ nonce</text><text class="message-detail" x="650" y="1444">signature · issuer · audience · expiry</text></g>
+      <rect class="note" x="744" y="1403" width="245" height="56"/><text class="note-text" x="758" y="1424">Token/identity ไม่ถูกต้อง</text><text class="note-text" x="758" y="1443">ตอบ 401 authentication failed</text>
+      <g><circle class="step" cx="815" cy="1500" r="12"/><text class="step-text" x="815" y="1500">18</text><line class="store-message" x1="508" y1="1500" x2="1122" y2="1500"/><text class="message-label" x="815" y="1484">สร้างและบันทึก Session</text><text class="message-detail" x="815" y="1520">subject · issuer · roles · expiry</text></g>
+      <g><circle class="step" cx="920" cy="1570" r="12"/><text class="step-text" x="920" y="1570">19</text><line class="store-message" x1="508" y1="1570" x2="1332" y2="1570"/><text class="message-label" x="920" y="1554">เก็บ OAuth/OIDC Tokens ฝั่ง Server</text></g>
+      <g><circle class="step" cx="395" cy="1640" r="12"/><text class="step-text" x="395" y="1640">20</text><line class="return" x1="492" y1="1640" x2="298" y2="1640"/><text class="message-label" x="395" y="1624">Set-Cookie + 302 return_to</text><text class="message-detail" x="395" y="1660">opaque session ID เท่านั้น</text></g>
+
+      <!-- Phase 4 -->
+      <rect class="phase" x="198" y="1700" width="1370" height="165"/><text class="phase-label" x="214" y="1723">PHASE 4 · โหลด USER CONTEXT</text>
+      <g><circle class="step" cx="395" cy="1770" r="12"/><text class="step-text" x="395" y="1770">21</text><line class="message" x1="298" y1="1770" x2="492" y2="1770"/><text class="message-label" x="395" y="1754">GET /api/me + Session Cookie</text></g>
+      <g><line class="store-message" x1="508" y1="1818" x2="1122" y2="1818"/><text class="message-label" x="815" y="1802">ตรวจ Session</text></g>
+      <g><line class="message" x1="508" y1="1850" x2="1499" y2="1850"/><text class="message-label" x="1004" y="1834">ประเมิน Roles → Permissions / Capabilities</text></g>
+
+      <!-- Footer actors -->
+      <g>
+        <rect class="actor" x="215" y="1872" width="150" height="36"/><text class="actor-label" x="290" y="1895">Browser</text>
+        <rect class="actor actor-primary" x="425" y="1872" width="150" height="36"/><text class="actor-label" x="500" y="1895">REBFF</text>
+        <rect class="actor actor-store" x="1055" y="1872" width="150" height="36"/><text class="actor-label" x="1130" y="1895">Session Store</text>
+        <rect class="actor" x="1440" y="1872" width="135" height="36"/><text class="actor-label" x="1507" y="1895">Policy</text>
+      </g>
+    </svg>
+  </section>
+
+  <section class="legend" aria-label="คำอธิบาย">
+    <article><strong><i class="dot" style="background:var(--accent)"></i>Browser Session</strong><span>Production ใช้ <code>__Host-bff_session</code>; Local HTTP ใช้ <code>bff_session</code></span></article>
+    <article><strong><i class="dot" style="background:var(--store)"></i>Server-side State</strong><span>Flow, session และ token สามารถเก็บใน Redis เพื่อใช้ร่วมกันระหว่างหลาย replica</span></article>
+    <article><strong><i class="dot" style="background:var(--success)"></i>Identity Boundary</strong><span>รหัสผ่าน, MFA และ SSO ถูกจัดการโดย Identity Provider ไม่ผ่าน REBFF</span></article>
+    <article><strong><i class="dot" style="background:var(--warning)"></i>Security Controls</strong><span>PKCE S256, one-time state, nonce และ ID Token verification ป้องกัน callback/replay attacks</span></article>
+  </section>
+
+  <footer>
+    อ้างอิง implementation: <code>internal/auth/http.go</code>, <code>internal/auth/service.go</code>, <code>internal/auth/oidc/provider.go</code> และ <code>internal/usercontext/resolver.go</code>
+  </footer>
+</main>
+</body>
+</html>

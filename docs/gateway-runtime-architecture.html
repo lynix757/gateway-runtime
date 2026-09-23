@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gateway Runtime Architecture</title>
+  <style>
+    :root {
+      --bg: #020617;
+      --panel: rgba(15, 23, 42, .72);
+      --line: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --cyan: #22d3ee;
+      --cyan-fill: rgba(8, 51, 68, .78);
+      --emerald: #34d399;
+      --emerald-fill: rgba(6, 78, 59, .68);
+      --violet: #a78bfa;
+      --violet-fill: rgba(76, 29, 149, .62);
+      --amber: #fbbf24;
+      --amber-fill: rgba(120, 53, 15, .55);
+      --rose: #fb7185;
+      --rose-fill: rgba(136, 19, 55, .60);
+      --orange: #fb923c;
+      --slate: #94a3b8;
+      --slate-fill: rgba(30, 41, 59, .88);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 32px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    .container { max-width: 1560px; margin: 0 auto; }
+    .header { margin-bottom: 24px; }
+    .header-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .pulse-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 18px var(--cyan); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
+    h1 { margin: 0; font-size: clamp(22px, 3vw, 34px); letter-spacing: -.04em; }
+    .subtitle { margin: 0 0 0 23px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .diagram-container { overflow-x: auto; border: 1px solid #1e293b; border-radius: 16px; padding: 16px; background: var(--panel); box-shadow: 0 22px 60px rgba(0,0,0,.34); }
+    svg { display: block; width: 100%; min-width: 1380px; height: auto; }
+    .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+    .card { border: 1px solid #1e293b; border-radius: 12px; padding: 16px; background: var(--panel); }
+    .card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card h2 { margin: 0; font-size: 13px; }
+    .card ul { margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 11px; line-height: 1.75; }
+    .card li::before { content: "•"; margin-right: 7px; color: var(--dot); }
+    .footer { margin: 18px 0 0; text-align: center; color: #64748b; font-size: 11px; line-height: 1.7; }
+    code { color: #c4b5fd; }
+    @media (max-width: 980px) { .cards { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+    @media (max-width: 620px) { body { padding: 18px 10px; } .subtitle { margin-left: 0; } .cards { grid-template-columns: 1fr; } }
+    @media (prefers-reduced-motion: reduce) { .pulse-dot { animation: none; } }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header class="header">
+    <div class="header-row"><span class="pulse-dot" aria-hidden="true"></span><h1>gateway-runtime · Architecture</h1></div>
+    <p class="subtitle">Reusable Go gateway runtime — Edge routing, browser security boundary, specialized gateway roles และ replaceable providers</p>
+  </header>
+
+  <section class="diagram-container" aria-label="Gateway Runtime architecture diagram">
+    <svg viewBox="0 0 1480 1060" role="img" aria-labelledby="title desc">
+      <title id="title">Gateway Runtime Architecture</title>
+      <desc id="desc">Architecture showing clients, edge, REBFF and specialized runtime roles, shared stores, domain services, identity provider, capability providers and specialized data planes.</desc>
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#1e293b" stroke-width=".55"/></pattern>
+        <marker id="arrow" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5L0 7Z" fill="#64748b"/></marker>
+        <marker id="arrowCyan" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5L0 7Z" fill="#22d3ee"/></marker>
+        <marker id="arrowRose" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5L0 7Z" fill="#fb7185"/></marker>
+        <marker id="arrowViolet" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5L0 7Z" fill="#a78bfa"/></marker>
+        <marker id="arrowAmber" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5L0 7Z" fill="#fbbf24"/></marker>
+        <filter id="glow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+
+      <rect width="1480" height="1060" rx="12" fill="#020617"/>
+      <rect width="1480" height="1060" rx="12" fill="url(#grid)"/>
+
+      <!-- Boundaries -->
+      <rect x="18" y="58" width="180" height="784" rx="12" fill="rgba(30,41,59,.16)" stroke="#475569" stroke-dasharray="7 5"/>
+      <text x="32" y="80" fill="#94a3b8" font-size="11" font-weight="700">CLIENT CHANNELS</text>
+
+      <rect x="220" y="58" width="1120" height="784" rx="14" fill="rgba(251,191,36,.025)" stroke="#fbbf24" stroke-dasharray="9 5"/>
+      <text x="236" y="80" fill="#fbbf24" font-size="11" font-weight="700">KUBERNETES / DEPLOYMENT BOUNDARY</text>
+
+      <rect x="412" y="174" width="565" height="624" rx="12" fill="rgba(52,211,153,.025)" stroke="#34d399" stroke-dasharray="6 5"/>
+      <text x="958" y="196" fill="#34d399" font-size="9" font-weight="700" text-anchor="end">GATEWAY-RUNTIME DEPLOYMENT</text>
+
+      <rect x="1000" y="58" width="450" height="784" rx="12" fill="rgba(148,163,184,.025)" stroke="#475569" stroke-dasharray="7 5"/>
+      <text x="1016" y="80" fill="#94a3b8" font-size="11" font-weight="700">EXTERNAL SYSTEMS / PROVIDERS</text>
+
+      <!-- Arrows rendered behind components -->
+      <!-- Browser to CDN and edge -->
+      <path d="M173 174H270" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrowCyan)"/>
+      <text x="220" y="164" fill="#94a3b8" font-size="9" text-anchor="middle">static assets</text>
+      <path d="M173 295H270" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrowCyan)"/>
+      <text x="220" y="285" fill="#94a3b8" font-size="9" text-anchor="middle">HTTPS</text>
+
+      <!-- Edge to runtime roles -->
+      <path d="M388 295H455" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrowCyan)"/>
+      <text x="422" y="285" fill="#94a3b8" font-size="8" text-anchor="middle">/auth /api</text>
+      <path d="M330 330V485H455" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <path d="M330 330V610H455" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <path d="M330 330V735H455" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- REBFF external flows -->
+      <path d="M735 250H968V132H1028" fill="none" stroke="#fb7185" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#arrowRose)"/>
+      <text x="850" y="240" fill="#fb7185" font-size="9" text-anchor="middle">OIDC Code + PKCE</text>
+      <path d="M735 305H1028" fill="none" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <text x="880" y="295" fill="#94a3b8" font-size="9" text-anchor="middle">Bearer token + request context</text>
+
+      <!-- REBFF to platform state / audit / metrics (dedicated vertical lanes) -->
+      <path d="M505 218V160" fill="none" stroke="#a78bfa" stroke-width="1.7" marker-end="url(#arrowViolet)"/>
+      <path d="M595 218V160" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/>
+      <path d="M685 218V160" fill="none" stroke="#fb923c" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+      <!-- Specialized role providers -->
+      <path d="M735 485H1028" fill="none" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <text x="880" y="475" fill="#94a3b8" font-size="9" text-anchor="middle">presign / metadata / policy</text>
+      <path d="M735 610H1028" fill="none" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <text x="880" y="600" fill="#94a3b8" font-size="9" text-anchor="middle">playback bootstrap</text>
+      <path d="M735 735H1028" fill="none" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <text x="880" y="725" fill="#94a3b8" font-size="9" text-anchor="middle">realtime bridge</text>
+
+      <!-- Direct specialized data planes -->
+      <path d="M173 415H205V958H1028V896H1060" fill="none" stroke="#fbbf24" stroke-width="1.9" stroke-dasharray="8 5" marker-end="url(#arrowAmber)"/>
+      <text x="640" y="950" fill="#fbbf24" font-size="10" text-anchor="middle">direct object/media data plane · short-lived credentials</text>
+      <path d="M173 535H210V815H425V735H455" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrowCyan)"/>
+      <text x="318" y="806" fill="#94a3b8" font-size="9" text-anchor="middle">long-lived connection</text>
+
+      <!-- Clients -->
+      <g>
+        <rect x="42" y="130" width="132" height="82" rx="8" fill="#0f172a"/><rect x="42" y="130" width="132" height="82" rx="8" fill="var(--cyan-fill)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="108" y="159" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Web Frontend</text>
+        <text x="108" y="178" fill="#94a3b8" font-size="9" text-anchor="middle">Browser / SPA</text>
+        <text x="108" y="195" fill="#22d3ee" font-size="8" text-anchor="middle">Cookie-based session</text>
+
+        <rect x="42" y="252" width="132" height="82" rx="8" fill="#0f172a"/><rect x="42" y="252" width="132" height="82" rx="8" fill="var(--slate-fill)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="108" y="281" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Browser API</text>
+        <text x="108" y="300" fill="#94a3b8" font-size="9" text-anchor="middle">/auth/* · /api/*</text>
+        <text x="108" y="317" fill="#94a3b8" font-size="8" text-anchor="middle">CSRF + session cookie</text>
+
+        <rect x="42" y="374" width="132" height="82" rx="8" fill="#0f172a"/><rect x="42" y="374" width="132" height="82" rx="8" fill="var(--amber-fill)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="108" y="403" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Bulk Data Client</text>
+        <text x="108" y="422" fill="#94a3b8" font-size="9" text-anchor="middle">Upload / Download</text>
+        <text x="108" y="439" fill="#fbbf24" font-size="8" text-anchor="middle">Presigned operation</text>
+
+        <rect x="42" y="494" width="132" height="82" rx="8" fill="#0f172a"/><rect x="42" y="494" width="132" height="82" rx="8" fill="var(--cyan-fill)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="108" y="523" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Realtime Client</text>
+        <text x="108" y="542" fill="#94a3b8" font-size="9" text-anchor="middle">WebSocket</text>
+        <text x="108" y="559" fill="#22d3ee" font-size="8" text-anchor="middle">Connection lifecycle</text>
+      </g>
+
+      <!-- Edge -->
+      <g>
+        <rect x="270" y="130" width="118" height="82" rx="8" fill="#0f172a"/><rect x="270" y="130" width="118" height="82" rx="8" fill="var(--amber-fill)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="329" y="159" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">CDN / Web</text>
+        <text x="329" y="178" fill="#94a3b8" font-size="9" text-anchor="middle">Static frontend</text>
+        <text x="329" y="195" fill="#fbbf24" font-size="8" text-anchor="middle">Bypasses BFF</text>
+
+        <rect x="270" y="252" width="118" height="82" rx="8" fill="#0f172a"/><rect x="270" y="252" width="118" height="82" rx="8" fill="var(--amber-fill)" stroke="#fbbf24" stroke-width="1.5" filter="url(#glow)"/>
+        <text x="329" y="278" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Envoy Gateway</text>
+        <text x="329" y="297" fill="#94a3b8" font-size="9" text-anchor="middle">Gateway API · TLS</text>
+        <text x="329" y="314" fill="#fbbf24" font-size="8" text-anchor="middle">Edge routing / LB</text>
+      </g>
+
+      <!-- Runtime roles -->
+      <g>
+        <rect x="455" y="218" width="280" height="167" rx="10" fill="#0f172a"/><rect x="455" y="218" width="280" height="167" rx="10" fill="var(--emerald-fill)" stroke="#34d399" stroke-width="1.8" filter="url(#glow)"/>
+        <text x="595" y="244" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">REBFF Role</text>
+        <text x="595" y="264" fill="#34d399" font-size="9" text-anchor="middle">browser security / control plane</text>
+        <line x1="475" y1="278" x2="715" y2="278" stroke="#256a55"/>
+        <text x="478" y="299" fill="#cbd5e1" font-size="9">OIDC Authorization Code + PKCE</text>
+        <text x="478" y="317" fill="#cbd5e1" font-size="9">Opaque session · CSRF · token refresh</text>
+        <text x="478" y="335" fill="#cbd5e1" font-size="9">/api/me · coarse authorization</text>
+        <text x="478" y="353" fill="#cbd5e1" font-size="9">API proxy · audit · trace propagation</text>
+        <text x="478" y="373" fill="#94a3b8" font-size="8">Routes: /auth/* · /api/* · /health/* · /metrics</text>
+
+        <rect x="455" y="430" width="280" height="108" rx="10" fill="#0f172a"/><rect x="455" y="430" width="280" height="108" rx="10" fill="var(--emerald-fill)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="595" y="457" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">Storage Role</text>
+        <text x="595" y="477" fill="#94a3b8" font-size="9" text-anchor="middle">upload · download · presign · metadata</text>
+        <text x="595" y="496" fill="#94a3b8" font-size="9" text-anchor="middle">multipart · target registry · access policy</text>
+        <text x="595" y="519" fill="#34d399" font-size="8" text-anchor="middle">Control plane only — payload bypasses runtime</text>
+
+        <rect x="455" y="560" width="280" height="100" rx="10" fill="#0f172a"/><rect x="455" y="560" width="280" height="100" rx="10" fill="var(--emerald-fill)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="595" y="588" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">Streaming Role</text>
+        <text x="595" y="609" fill="#94a3b8" font-size="9" text-anchor="middle">playback · manifest · token · origin-select</text>
+        <text x="595" y="638" fill="#34d399" font-size="8" text-anchor="middle">Playback bootstrap / short-lived credential</text>
+
+        <rect x="455" y="685" width="280" height="100" rx="10" fill="#0f172a"/><rect x="455" y="685" width="280" height="100" rx="10" fill="var(--emerald-fill)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="595" y="713" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">WebSocket Role</text>
+        <text x="595" y="734" fill="#94a3b8" font-size="9" text-anchor="middle">connect · publish · subscribe · presence</text>
+        <text x="595" y="763" fill="#34d399" font-size="8" text-anchor="middle">Long-lived realtime data path</text>
+      </g>
+
+      <!-- Platform state & observability: top row keeps service lanes clear -->
+      <g>
+        <rect x="430" y="100" width="150" height="60" rx="8" fill="#0f172a"/><rect x="430" y="100" width="150" height="60" rx="8" fill="var(--violet-fill)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="505" y="124" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Redis</text>
+        <text x="505" y="142" fill="#94a3b8" font-size="8" text-anchor="middle">Flow · Session · Token</text>
+        <text x="505" y="154" fill="#94a3b8" font-size="7" text-anchor="middle">Cache · Refresh Lock</text>
+
+        <rect x="600" y="100" width="150" height="60" rx="8" fill="#0f172a"/><rect x="600" y="100" width="150" height="60" rx="8" fill="var(--slate-fill)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="675" y="124" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Audit Sink</text>
+        <text x="675" y="142" fill="#94a3b8" font-size="8" text-anchor="middle">Canonical events</text>
+        <text x="675" y="154" fill="#94a3b8" font-size="7" text-anchor="middle">Append-only evidence</text>
+
+        <rect x="770" y="100" width="150" height="60" rx="8" fill="#0f172a"/><rect x="770" y="100" width="150" height="60" rx="8" fill="rgba(194,65,12,.5)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="845" y="124" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Observability</text>
+        <text x="845" y="142" fill="#94a3b8" font-size="8" text-anchor="middle">Prometheus · Request ID</text>
+        <text x="845" y="154" fill="#94a3b8" font-size="7" text-anchor="middle">Trace ID · access logs</text>
+      </g>
+
+      <!-- External systems -->
+      <g>
+        <rect x="1028" y="96" width="186" height="72" rx="8" fill="#0f172a"/><rect x="1028" y="96" width="186" height="72" rx="8" fill="var(--rose-fill)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="1121" y="122" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Identity Provider</text>
+        <text x="1121" y="142" fill="#94a3b8" font-size="9" text-anchor="middle">Keycloak / OIDC · SSO · MFA</text>
+        <text x="1121" y="157" fill="#fb7185" font-size="8" text-anchor="middle">Owns credentials</text>
+
+        <rect x="1028" y="260" width="186" height="88" rx="8" fill="#0f172a"/><rect x="1028" y="260" width="186" height="88" rx="8" fill="var(--emerald-fill)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="1121" y="287" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Domain Services</text>
+        <text x="1121" y="307" fill="#94a3b8" font-size="9" text-anchor="middle">Business rules · transactions</text>
+        <text x="1121" y="325" fill="#34d399" font-size="8" text-anchor="middle">Final resource authorization</text>
+
+        <rect x="1028" y="438" width="186" height="95" rx="8" fill="#0f172a"/><rect x="1028" y="438" width="186" height="95" rx="8" fill="var(--slate-fill)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="1121" y="464" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Storage Providers</text>
+        <text x="1121" y="484" fill="#94a3b8" font-size="8" text-anchor="middle">Remote signer · access policy</text>
+        <text x="1121" y="501" fill="#94a3b8" font-size="8" text-anchor="middle">MinIO / S3 adapters</text>
+        <text x="1121" y="518" fill="#34d399" font-size="8" text-anchor="middle">Replaceable contracts</text>
+
+        <rect x="1028" y="570" width="186" height="80" rx="8" fill="#0f172a"/><rect x="1028" y="570" width="186" height="80" rx="8" fill="var(--slate-fill)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="1121" y="597" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Streaming Provider</text>
+        <text x="1121" y="618" fill="#94a3b8" font-size="9" text-anchor="middle">Origin / CDN / manifest</text>
+        <text x="1121" y="636" fill="#34d399" font-size="8" text-anchor="middle">Provider contract</text>
+
+        <rect x="1028" y="695" width="186" height="80" rx="8" fill="#0f172a"/><rect x="1028" y="695" width="186" height="80" rx="8" fill="var(--slate-fill)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="1121" y="722" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Realtime Broker</text>
+        <text x="1121" y="743" fill="#94a3b8" font-size="9" text-anchor="middle">Pub/Sub · routing · fanout</text>
+        <text x="1121" y="761" fill="#34d399" font-size="8" text-anchor="middle">Replaceable adapter</text>
+
+        <rect x="1060" y="860" width="330" height="72" rx="8" fill="#0f172a"/><rect x="1060" y="860" width="330" height="72" rx="8" fill="var(--amber-fill)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="1225" y="887" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">Specialized Data Plane</text>
+        <text x="1225" y="907" fill="#94a3b8" font-size="9" text-anchor="middle">Object Storage · Streaming CDN · WebSocket channel</text>
+        <text x="1225" y="922" fill="#fbbf24" font-size="8" text-anchor="middle">Bulk payloads bypass REBFF</text>
+      </g>
+
+      <!-- Architecture rule -->
+      <rect x="240" y="860" width="690" height="72" rx="8" fill="#0f172a" stroke="#334155"/>
+      <text x="585" y="884" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">COMPOSITION RULE</text>
+      <text x="585" y="905" fill="#34d399" font-size="10" text-anchor="middle">Shared Platform Core + Runtime Role + Enabled Capabilities + Replaceable Adapters</text>
+      <text x="585" y="921" fill="#94a3b8" font-size="8" text-anchor="middle">Unsupported role/capability combinations fail at startup · no silent provider fallback</text>
+
+      <!-- Legend outside boundaries -->
+      <g transform="translate(28 1022)">
+        <text x="0" y="0" fill="#fff" font-size="10" font-weight="700">LEGEND</text>
+        <rect x="72" y="-11" width="16" height="11" rx="2" fill="var(--cyan-fill)" stroke="#22d3ee"/><text x="96" y="-2" fill="#94a3b8" font-size="8">Client / Frontend</text>
+        <rect x="205" y="-11" width="16" height="11" rx="2" fill="var(--emerald-fill)" stroke="#34d399"/><text x="229" y="-2" fill="#94a3b8" font-size="8">Runtime / Backend</text>
+        <rect x="350" y="-11" width="16" height="11" rx="2" fill="var(--violet-fill)" stroke="#a78bfa"/><text x="374" y="-2" fill="#94a3b8" font-size="8">State Store</text>
+        <rect x="466" y="-11" width="16" height="11" rx="2" fill="var(--rose-fill)" stroke="#fb7185"/><text x="490" y="-2" fill="#94a3b8" font-size="8">Security / Identity</text>
+        <rect x="610" y="-11" width="16" height="11" rx="2" fill="var(--amber-fill)" stroke="#fbbf24"/><text x="634" y="-2" fill="#94a3b8" font-size="8">Edge / Data Plane</text>
+        <line x1="760" y1="-5" x2="790" y2="-5" stroke="#fb7185" stroke-dasharray="5 4"/><text x="800" y="-2" fill="#94a3b8" font-size="8">Auth flow</text>
+        <line x1="880" y1="-5" x2="910" y2="-5" stroke="#fbbf24" stroke-dasharray="7 4"/><text x="920" y="-2" fill="#94a3b8" font-size="8">Direct data plane</text>
+      </g>
+    </svg>
+  </section>
+
+  <section class="cards" aria-label="Architecture summary">
+    <article class="card" style="--dot:var(--rose)">
+      <div class="card-header"><span class="card-dot" style="background:var(--rose)"></span><h2>Security Boundary</h2></div>
+      <ul><li>OIDC Authorization Code + PKCE</li><li>Opaque browser session cookie</li><li>OAuth/OIDC tokens remain server-side</li><li>CSRF, rate limit และ security headers</li></ul>
+    </article>
+    <article class="card" style="--dot:var(--emerald)">
+      <div class="card-header"><span class="card-dot" style="background:var(--emerald)"></span><h2>Runtime Model</h2></div>
+      <ul><li>หนึ่ง binary/container รองรับหลาย roles</li><li>Production แยก deployment ตาม workload family</li><li>Capabilities เปิดใช้งานอย่าง explicit</li><li>Provider-backed operations fail closed</li></ul>
+    </article>
+    <article class="card" style="--dot:var(--violet)">
+      <div class="card-header"><span class="card-dot" style="background:var(--violet)"></span><h2>Shared State</h2></div>
+      <ul><li>Redis รองรับหลาย REBFF replicas</li><li>แยก SessionStore และ TokenStore</li><li>One-time OIDC flow state</li><li>User-context cache ไม่ใช่ source of truth</li></ul>
+    </article>
+    <article class="card" style="--dot:var(--amber)">
+      <div class="card-header"><span class="card-dot" style="background:var(--amber)"></span><h2>Data-plane Rule</h2></div>
+      <ul><li>Static frontend bypasses REBFF</li><li>Bulk object payload ส่งตรงไป storage</li><li>Streaming payload ผ่าน CDN/origin</li><li>WebSocket role ถือ long-lived connection</li></ul>
+    </article>
+  </section>
+
+  <p class="footer">Sources: <code>README.md</code> · <code>docs/ARCHITECTURE.md</code> · <code>docs/SPEC.md</code> · <code>internal/app/app.go</code><br>Standalone HTML/SVG · No JavaScript · No external dependencies</p>
+</div>
+</body>
+</html>
