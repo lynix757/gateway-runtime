@@ -183,7 +183,9 @@ internal/httpx/        HTTP helpers
 docs/                  architecture/spec/ADRs
 ```
 
-See `docs/SPEC.md` and `docs/ARCHITECTURE.md`.
+See `docs/SPEC.md`, `docs/ARCHITECTURE.md`, and
+`docs/ADR-002-control-plane-and-specialized-data-paths.md` for the accepted
+control-plane/data-path routing decision.
 
 
 ## Runtime configuration

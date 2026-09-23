@@ -152,6 +152,9 @@ Receives append-only events. Producers do not own the durable global audit model
 
 ## Control plane and specialized data plane
 
+The project-wide routing decision is recorded in
+[`ADR-002: Control Plane and Specialized Data Paths`](ADR-002-control-plane-and-specialized-data-paths.md).
+
 ```text
 Control path
 Browser -> REBFF -> Application API
