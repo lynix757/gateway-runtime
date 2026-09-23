@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WebSocket Connection Sequence · Authentication and Role Gate</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --surface:#f6f8fb; --panel:#fff; --ink:#172033; --muted:#667085; --border:#d0d5dd;
+      --blue:#2563eb; --blue-soft:#dbeafe; --green:#047857; --green-soft:#d1fae5;
+      --amber:#b45309; --amber-soft:#fef3c7; --red:#b42318; --red-soft:#fee4e2;
+      --purple:#7c3aed; --purple-soft:#ede9fe; --cyan:#087e8b; --cyan-soft:#cffafe;
+      --radius:16px;
+    }
+    *{box-sizing:border-box} body{margin:0;background:var(--surface);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    main{max-width:1780px;margin:0 auto;padding:30px 22px 44px} header{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:20px}
+    h1{margin:0 0 8px;font-size:clamp(25px,3vw,40px);letter-spacing:-.035em} .subtitle{margin:0;color:var(--muted);max-width:1080px;line-height:1.65}
+    .badge{white-space:nowrap;padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:var(--panel);font-size:12px;font-weight:800;color:var(--muted)}
+    .shell{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel);box-shadow:0 18px 50px rgba(16,24,40,.08)}
+    svg{display:block;width:1700px;min-width:1700px;height:auto}.lane-title{fill:var(--ink);font-size:19px;font-weight:800}.lane-sub{fill:var(--muted);font-size:12px}
+    .lane-anon{fill:color-mix(in srgb,var(--amber-soft) 35%,transparent);stroke:var(--amber);stroke-width:1.2}.lane-auth{fill:color-mix(in srgb,var(--blue-soft) 35%,transparent);stroke:var(--blue);stroke-width:1.2}
+    .actor{fill:var(--panel);stroke:var(--border);stroke-width:1.4}.actor-app{fill:var(--blue-soft);stroke:var(--blue)}.actor-ws{fill:var(--green-soft);stroke:var(--green)}.actor-store{fill:var(--purple-soft);stroke:var(--purple)}
+    .actor-label{fill:var(--ink);font-size:12px;font-weight:800;text-anchor:middle}.actor-detail{fill:var(--muted);font-size:9px;text-anchor:middle}.life{stroke:var(--border);stroke-width:1;stroke-dasharray:5 6}
+    .msg{stroke:var(--ink);stroke-width:1.55;fill:none;marker-end:url(#arrow)}.ret{stroke:var(--blue);stroke-width:1.55;stroke-dasharray:5 4;fill:none;marker-end:url(#arrow-blue)}.store{stroke:var(--purple);stroke-width:1.55;fill:none;marker-end:url(#arrow-purple)}
+    .label{fill:var(--ink);font-size:11px;font-weight:700;text-anchor:middle}.detail{fill:var(--muted);font-size:9.5px;text-anchor:middle}.step{fill:var(--blue)}.step-anon{fill:var(--amber)}.step-text{fill:#fff;font-size:9px;font-weight:800;text-anchor:middle;dominant-baseline:middle}
+    .alt{fill:var(--red-soft);stroke:var(--red);stroke-width:1;stroke-dasharray:4 4}.allow{fill:var(--green-soft);stroke:var(--green);stroke-width:1;stroke-dasharray:4 4}.box-title{fill:var(--red);font-size:10px;font-weight:800}.allow-title{fill:var(--green);font-size:10px;font-weight:800}.box-text{fill:var(--ink);font-size:10px;font-weight:650}
+    .section-label{fill:var(--muted);font-size:10px;font-weight:800;letter-spacing:.08em}.divider{stroke:var(--border);stroke-width:1.2}
+    .cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}.card{border:1px solid var(--border);border-radius:13px;background:var(--panel);padding:15px 16px}.card h2{margin:0 0 7px;font-size:14px}.card ul{margin:0;padding-left:18px;color:var(--muted);font-size:12px;line-height:1.65}.card strong{color:var(--ink)}
+    footer{margin-top:16px;color:var(--muted);font-size:12px;line-height:1.65}
+    code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.95em}
+    @media(prefers-color-scheme:dark){:root{--surface:#08111f;--panel:#0f1b2d;--ink:#e6edf7;--muted:#a9b4c6;--border:#334155;--blue:#60a5fa;--blue-soft:#172c4c;--green:#34d399;--green-soft:#12382f;--amber:#fbbf24;--amber-soft:#3b2d11;--red:#f87171;--red-soft:#3d1c22;--purple:#a78bfa;--purple-soft:#2d2348;--cyan:#22d3ee;--cyan-soft:#123540}}
+    @media(max-width:800px){main{padding:18px 10px 30px}header{align-items:flex-start;flex-direction:column}.cards{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>WebSocket Connection Sequence</h1>
+      <p class="subtitle">อนุญาต WebSocket เฉพาะผู้ใช้ที่ <strong>authenticated และมี role ที่กำหนด</strong> เท่านั้น ผู้ใช้ที่ไม่มี session ถูกปฏิเสธใน control path และจะไม่ได้รับ connection ticket หรือเข้าสู่ WebSocket upgrade</p>
+    </div>
+    <div class="badge">PROPOSED · NOT IMPLEMENTED</div>
+  </header>
+
+  <section class="shell" aria-label="WebSocket connection sequence comparison">
+    <svg viewBox="0 0 1700 1540" role="img" aria-labelledby="title desc">
+      <title id="title">WebSocket authentication and role authorization gate</title>
+      <desc id="desc">Side-by-side sequence diagrams showing unauthenticated requests rejected before upgrade and authenticated users admitted only after session, role, domain, and ticket validation.</desc>
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--ink)"/></marker>
+        <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--blue)"/></marker>
+        <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--purple)"/></marker>
+      </defs>
+
+      <rect class="lane-anon" x="18" y="18" width="812" height="1495" rx="14"/><rect class="lane-auth" x="870" y="18" width="812" height="1495" rx="14"/>
+      <text class="lane-title" x="42" y="52">A · Unauthenticated → Reject</text><text class="lane-sub" x="42" y="73">ไม่มี anonymous/public WebSocket และไม่มี fallback เมื่อ session ไม่ผ่าน</text>
+      <text class="lane-title" x="894" y="52">B · Authenticated + Allowed Role → Connect</text><text class="lane-sub" x="894" y="73">ต้องผ่าน session, required-role และ final domain authorization ก่อนออก ticket</text>
+
+      <!-- actors: unauthenticated rejection -->
+      <g>
+        <rect class="actor" x="38" y="96" width="120" height="52" rx="8"/><text class="actor-label" x="98" y="118">Browser</text><text class="actor-detail" x="98" y="136">Web Client</text>
+        <rect class="actor actor-app" x="192" y="96" width="120" height="52" rx="8"/><text class="actor-label" x="252" y="118">REBFF</text><text class="actor-detail" x="252" y="136">Control Path</text>
+        <rect class="actor actor-store" x="346" y="96" width="120" height="52" rx="8"/><text class="actor-label" x="406" y="118">Session Store</text><text class="actor-detail" x="406" y="136">Opaque Session</text>
+        <rect class="actor" x="500" y="96" width="120" height="52" rx="8"/><text class="actor-label" x="560" y="118">Domain API</text><text class="actor-detail" x="560" y="136">Not Called</text>
+        <rect class="actor actor-ws" x="654" y="96" width="150" height="52" rx="8"/><text class="actor-label" x="729" y="118">WebSocket Gateway</text><text class="actor-detail" x="729" y="136">Long-lived Path</text>
+        <line class="life" x1="98" y1="148" x2="98" y2="1460"/><line class="life" x1="252" y1="148" x2="252" y2="1460"/><line class="life" x1="406" y1="148" x2="406" y2="1460"/><line class="life" x1="560" y1="148" x2="560" y2="1460"/><line class="life" x1="729" y1="148" x2="729" y2="1460"/>
+      </g>
+
+      <!-- actors: authenticated -->
+      <g>
+        <rect class="actor" x="890" y="96" width="120" height="52" rx="8"/><text class="actor-label" x="950" y="118">Browser</text><text class="actor-detail" x="950" y="136">Web Client</text>
+        <rect class="actor actor-app" x="1044" y="96" width="120" height="52" rx="8"/><text class="actor-label" x="1104" y="118">REBFF</text><text class="actor-detail" x="1104" y="136">Control Path</text>
+        <rect class="actor actor-store" x="1198" y="96" width="120" height="52" rx="8"/><text class="actor-label" x="1258" y="118">Session Store</text><text class="actor-detail" x="1258" y="136">Opaque Session</text>
+        <rect class="actor" x="1352" y="96" width="120" height="52" rx="8"/><text class="actor-label" x="1412" y="118">Domain API</text><text class="actor-detail" x="1412" y="136">Final Authorization</text>
+        <rect class="actor actor-ws" x="1506" y="96" width="150" height="52" rx="8"/><text class="actor-label" x="1581" y="118">WebSocket Gateway</text><text class="actor-detail" x="1581" y="136">Ticket + Registry</text>
+        <line class="life" x1="950" y1="148" x2="950" y2="1460"/><line class="life" x1="1104" y1="148" x2="1104" y2="1460"/><line class="life" x1="1258" y1="148" x2="1258" y2="1460"/><line class="life" x1="1412" y1="148" x2="1412" y2="1460"/><line class="life" x1="1581" y1="148" x2="1581" y2="1460"/>
+      </g>
+
+      <text class="section-label" x="42" y="184">CONTROL PATH · FAIL CLOSED</text><text class="section-label" x="894" y="184">CONTROL PATH · SESSION + ROLE + DOMAIN AUTHORIZATION</text>
+      <!-- unauthenticated rejection -->
+      <g><circle class="step-anon" cx="175" cy="230" r="10"/><text class="step-text" x="175" y="230">1</text><line class="msg" x1="106" y1="230" x2="244" y2="230"/><text class="label" x="175" y="214">POST /api/realtime/bootstrap</text><text class="detail" x="175" y="248">ไม่มี opaque session cookie</text></g>
+      <g><circle class="step-anon" cx="329" cy="300" r="10"/><text class="step-text" x="329" y="300">2</text><path class="msg" d="M260 300H329V330H263"/><text class="label" x="345" y="284">Require authenticated session</text><text class="detail" x="350" y="318">ไม่สร้าง anonymous principal</text></g>
+      <g><circle class="step-anon" cx="175" cy="395" r="10"/><text class="step-text" x="175" y="395">3</text><line class="ret" x1="244" y1="395" x2="106" y2="395"/><text class="label" x="175" y="379">401 authentication_required</text><text class="detail" x="175" y="413">อาจส่ง login URL ใน error contract ที่อนุมัติแล้ว</text></g>
+      <rect class="alt" x="80" y="470" width="630" height="96" rx="8"/><text class="box-title" x="96" y="494">STOP · NO WEBSOCKET ACCESS</text><text class="box-text" x="96" y="518">ไม่เรียก Domain API · ไม่ออก connection ticket · ไม่เรียก WebSocket Gateway</text><text class="box-text" x="96" y="540">ห้าม fallback เป็น anonymous เมื่อ session missing, expired หรือ invalid</text><text class="box-text" x="96" y="558">session-store unavailable ต้องตอบ 503 ไม่ใช่ 401</text>
+
+      <!-- authenticated bootstrap -->
+      <g><circle class="step" cx="1027" cy="230" r="10"/><text class="step-text" x="1027" y="230">1</text><line class="msg" x1="958" y1="230" x2="1096" y2="230"/><text class="label" x="1027" y="214">POST /api/realtime/bootstrap</text><text class="detail" x="1027" y="248">session cookie + CSRF/Origin + channel/action</text></g>
+      <g><circle class="step" cx="1181" cy="300" r="10"/><text class="step-text" x="1181" y="300">2</text><line class="store" x1="1112" y1="300" x2="1250" y2="300"/><text class="label" x="1181" y="284">Get(session_id)</text><text class="detail" x="1181" y="318">authoritative session validation</text></g>
+      <g><line class="ret" x1="1250" y1="365" x2="1112" y2="365"/><text class="label" x="1181" y="349">subject + tenant + auth context</text></g>
+      <rect class="alt" x="914" y="412" width="350" height="66" rx="8"/><text class="box-title" x="928" y="433">ALT · SESSION FAILURE</text><text class="box-text" x="928" y="453">missing/expired → 401 · store unavailable → 503</text><text class="box-text" x="928" y="469">ห้ามตีความ infrastructure failure เป็น unauthenticated</text>
+      <g><circle class="step" cx="1178" cy="520" r="10"/><text class="step-text" x="1178" y="520">3</text><path class="msg" d="M1112 520H1178V550H1115"/><text class="label" x="1212" y="504">Require allowed WebSocket role</text><text class="detail" x="1240" y="538">coarse role gate at REBFF</text></g>
+      <rect class="alt" x="930" y="580" width="334" height="50" rx="8"/><text class="box-title" x="944" y="600">ALT · ROLE NOT ALLOWED</text><text class="box-text" x="944" y="619">403 access_denied · ไม่เรียก WS Gateway</text>
+      <g><circle class="step" cx="1258" cy="680" r="10"/><text class="step-text" x="1258" y="680">4</text><line class="msg" x1="1112" y1="680" x2="1404" y2="680"/><text class="label" x="1258" y="664">Authorize channel/action</text><text class="detail" x="1258" y="698">Domain owns final business authorization</text></g>
+      <g><line class="ret" x1="1404" y1="735" x2="1112" y2="735"/><text class="label" x="1258" y="719">allow + bounded scopes</text></g>
+      <g><circle class="step" cx="1342" cy="785" r="10"/><text class="step-text" x="1342" y="785">5</text><line class="msg" x1="1112" y1="785" x2="1573" y2="785"/><text class="label" x="1342" y="769">Issue / register one-time ticket</text><text class="detail" x="1342" y="803">sub · roles · tenant · aud · channel · actions · exp · jti</text></g>
+      <g><circle class="step" cx="1027" cy="840" r="10"/><text class="step-text" x="1027" y="840">6</text><line class="ret" x1="1096" y1="840" x2="958" y2="840"/><text class="label" x="1027" y="824">200 bootstrap response</text><text class="detail" x="1027" y="858">wss endpoint + ticket (ไม่ใช่ OAuth token)</text></g>
+
+      <line class="divider" x1="40" y1="870" x2="808" y2="870"/><line class="divider" x1="892" y1="870" x2="1658" y2="870"/>
+      <text class="section-label" x="42" y="902">DATA PATH · NOT REACHED</text><text class="section-label" x="894" y="902">DATA PATH · UPGRADE + CONNECTION LIFECYCLE</text>
+
+      <!-- unauthenticated data path is intentionally unreachable -->
+      <rect class="alt" x="104" y="950" width="620" height="170" rx="10"/><text class="box-title" x="124" y="982">CONNECTION PROHIBITED</text><text class="box-text" x="124" y="1012">ไม่มี ticket จึงไม่สามารถผ่าน WebSocket upgrade ได้</text><text class="box-text" x="124" y="1038">หากเรียก <tspan font-family="ui-monospace, monospace">GET /ws</tspan> โดยตรง: reject ก่อน 101</text><text class="box-text" x="124" y="1064">ไม่ register connection · ไม่ subscribe/publish · ไม่สร้าง presence</text><text class="box-text" x="124" y="1090">บันทึก security/audit event ตาม canonical audit contract</text>
+
+      <!-- authenticated data path -->
+      <g><circle class="step" cx="1265" cy="960" r="10"/><text class="step-text" x="1265" y="960">7</text><line class="msg" x1="958" y1="960" x2="1573" y2="960"/><text class="label" x="1265" y="944">GET /ws · Upgrade + ticket · strict Origin check</text><text class="detail" x="1265" y="978">ignore/isolate session cookie; ห้ามใช้ OAuth token เป็น credential</text></g>
+      <g><circle class="step" cx="1496" cy="1030" r="10"/><text class="step-text" x="1496" y="1030">8</text><path class="msg" d="M1573 1030H1496V1060H1570"/><text class="label" x="1455" y="1014">Validate + consume(jti)</text><text class="detail" x="1438" y="1048">bind subject/roles/tenant/scopes to connection</text></g>
+      <rect class="alt" x="1282" y="1075" width="360" height="55" rx="8"/><text class="box-title" x="1296" y="1096">ALT · TICKET VALIDATION / STORE FAILURE</text><text class="box-text" x="1296" y="1116">invalid/replay/expired → 401/403 · store outage → 503 ก่อน 101</text>
+      <g><circle class="step" cx="1265" cy="1185" r="10"/><text class="step-text" x="1265" y="1185">9</text><line class="ret" x1="1573" y1="1185" x2="958" y2="1185"/><text class="label" x="1265" y="1169">101 Switching Protocols</text><text class="detail" x="1265" y="1203">register subject + authorized roles + audit allow</text></g>
+      <g><line class="msg" x1="958" y1="1255" x2="1573" y2="1255"/><text class="label" x="1265" y="1239">PUBLISH / SUBSCRIBE / PING / PONG</text><text class="detail" x="1265" y="1273">capability gate; dynamic/resource-sensitive actions → Domain re-check</text></g>
+      <rect class="allow" x="956" y="1310" width="620" height="74" rx="8"/><text class="allow-title" x="970" y="1332">AUTHORIZATION INVARIANT</text><text class="box-text" x="970" y="1352">authenticated + allowed role + domain allow + valid ticket ครบทุกเงื่อนไข</text><text class="box-text" x="970" y="1370">session/role revocation และ re-auth ระหว่าง connection ต้องกำหนดก่อน implement</text>
+      <g><line class="msg" x1="958" y1="1425" x2="1573" y2="1425"/><text class="label" x="1265" y="1409">Close / timeout / revoke</text><text class="detail" x="1265" y="1443">unregister connection + presence cleanup + audit disconnect</text></g>
+
+      <g>
+        <rect class="actor" x="38" y="1464" width="120" height="34" rx="7"/><text class="actor-label" x="98" y="1485">Browser</text><rect class="actor actor-ws" x="654" y="1464" width="150" height="34" rx="7"/><text class="actor-label" x="729" y="1485">WebSocket Gateway</text>
+        <rect class="actor" x="890" y="1464" width="120" height="34" rx="7"/><text class="actor-label" x="950" y="1485">Browser</text><rect class="actor actor-ws" x="1506" y="1464" width="150" height="34" rx="7"/><text class="actor-label" x="1581" y="1485">WebSocket Gateway</text>
+      </g>
+    </svg>
+  </section>
+
+  <section class="cards" aria-label="Design notes">
+    <article class="card"><h2>Mandatory gate</h2><ul><li><strong>Authenticated session</strong> ต้อง valid</li><li>ผู้ใช้ต้องมี <strong>allowed WebSocket role</strong></li><li>Domain API ต้องอนุญาต channel/action</li><li>ทุกเงื่อนไขต้องผ่านก่อนออก connection ticket</li></ul></article>
+    <article class="card"><h2>Fail-closed behavior</h2><ul><li>ไม่มี/หมดอายุ session → <code>401</code></li><li>ไม่มี role หรือ Domain deny → <code>403</code></li><li>session/ticket store unavailable → <code>503</code></li><li>ไม่มี anonymous fallback และ reject direct upgrade ก่อน <code>101</code></li></ul></article>
+    <article class="card"><h2>Decisions required before implementation</h2><ul><li>ชื่อ required role และ mapping ไปยัง permission</li><li>ticket carrier, TTL, atomic replay protection และ audit correlation</li><li>role/session revoke, per-message re-check และ re-auth ระหว่าง connection</li><li>connection, publish/subscribe และ rate limits ต่อ user/tenant</li></ul></article>
+  </section>
+
+  <footer>
+    อ้างอิง baseline: <code>docs/ARCHITECTURE.md</code> (REBFF control path และ WebSocket long-lived data path), <code>docs/SPEC.md</code> §6–7 และ §11. ปัจจุบัน repository ยังไม่มี WebSocket transport implementation; diagram นี้จึงเป็น proposal สำหรับ Planner/Security approval ไม่ใช่ภาพของ runtime ที่ deploy แล้ว
+  </footer>
+</main>
+</body>
+</html>
