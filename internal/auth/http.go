@@ -35,8 +35,10 @@ func (h Handler) login(w http.ResponseWriter, r *http.Request) {
 	start, err := h.Service.StartLogin(r.Context(), r.URL.Query().Get("return_to"))
 	if err != nil {
 		if errors.Is(err, ErrInvalidReturnTo) {
+			h.emit(r, "", "", "auth.login", "session", "deny", http.StatusBadRequest, map[string]string{"reason": "invalid_return_to"})
 			http.Error(w, "invalid login request", http.StatusBadRequest)
 		} else {
+			h.emit(r, "", "", "auth.login", "session", "error", http.StatusServiceUnavailable, map[string]string{"reason": "authentication_service_unavailable"})
 			http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
 		}
 		return
@@ -50,14 +52,14 @@ func (h Handler) callback(w http.ResponseWriter, r *http.Request) {
 		if h.Metrics != nil {
 			h.Metrics.RecordAuth("failure")
 		}
-		h.emit(r, "", "auth.login", "session", "failure", nil)
+		h.emit(r, "", "", "auth.login", "session", "deny", http.StatusUnauthorized, map[string]string{"reason": "invalid_callback"})
 		http.Error(w, "authentication failed", http.StatusUnauthorized)
 		return
 	}
 	if h.Metrics != nil {
 		h.Metrics.RecordAuth("success")
 	}
-	h.emit(r, "", "auth.login", "session", "success", nil)
+	h.emit(r, result.Subject, result.Username, "auth.login", "session", "success", http.StatusFound, nil)
 
 	http.SetCookie(w, &http.Cookie{
 		Name: h.cookieName(), Value: result.SessionID,
@@ -71,22 +73,23 @@ func (h Handler) logout(w http.ResponseWriter, r *http.Request) {
 	cookie, _ := r.Cookie(h.cookieName())
 	sessionID := ""
 	actor := ""
+	username := ""
 	if cookie != nil {
 		sessionID = cookie.Value
-		if h.UserContext != nil {
-			if uc, err := h.UserContext.Resolve(r.Context(), sessionID); err == nil {
-				actor = uc.Subject
+		if h.Service != nil && h.Service.Sessions != nil {
+			if s, err := h.Service.Sessions.Get(r.Context(), sessionID); err == nil {
+				actor, username = s.Subject, s.Username
 			}
 		}
 	}
 	global := strings.EqualFold(r.URL.Query().Get("global"), "true")
 	redirectTo, err := h.Service.Logout(r.Context(), sessionID, global)
 	if err != nil {
-		h.emit(r, actor, "auth.logout", "session", "failure", map[string]string{"global": boolString(global)})
+		h.emit(r, actor, username, "auth.logout", "session", "failure", http.StatusServiceUnavailable, map[string]string{"global": boolString(global)})
 		http.Error(w, "logout unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	h.emit(r, actor, "auth.logout", "session", "success", map[string]string{"global": boolString(global)})
+	h.emit(r, actor, username, "auth.logout", "session", "success", http.StatusSeeOther, map[string]string{"global": boolString(global)})
 	if h.Cache != nil && sessionID != "" {
 		_ = h.Cache.Delete(r.Context(), usercontext.CacheKey(sessionID))
 	}
@@ -122,14 +125,15 @@ func (h Handler) me(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(ctx)
 }
 
-func (h Handler) emit(r *http.Request, actor, action, target, outcome string, attrs map[string]string) {
+func (h Handler) emit(r *http.Request, actor, username, action, target, outcome string, status int, attrs map[string]string) {
 	if h.Audit == nil {
 		return
 	}
 	e := audit.NewEvent(action, target, outcome)
 	e.Actor = actor
-	e.CorrelationID = mw.RequestIDFromContext(r.Context())
-	e.TraceID = mw.TraceIDFromContext(r.Context())
+	e.ActorUsername = username
+	e.HTTPStatus = status
+	mw.EnrichAuditEvent(r, &e)
 	if attrs != nil {
 		e.Attributes = attrs
 	}

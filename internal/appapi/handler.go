@@ -58,6 +58,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 func (h Handler) getManagedItem(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" || strings.Contains(id, "/") {
+		h.emit(r, "managed-item.read", "managed-item", id, "deny", http.StatusBadRequest, map[string]string{"reason": "invalid_id"})
 		writeError(w, http.StatusBadRequest, "invalid_id")
 		return
 	}
@@ -69,9 +70,11 @@ func (h Handler) getManagedItem(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.Domain.GetManagedItem(r.Context(), sessionID, id)
 	if err != nil {
+		h.emit(r, "managed-item.read", "managed-item", id, "failure", outboundHTTPStatus(err), nil)
 		writeOutboundError(w, err)
 		return
 	}
+	h.emit(r, "managed-item.read", "managed-item", id, "success", http.StatusOK, nil)
 	writeJSON(w, http.StatusOK, item)
 }
 
@@ -86,12 +89,14 @@ func (h Handler) presignUpload(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
+		h.emit(r, "storage.presign_put", "object", "", "deny", http.StatusBadRequest, map[string]string{"reason": "invalid_request"})
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 
 	key, ok := validateObjectKey(in.ObjectKey, h.UploadPrefixes)
 	if !ok || strings.TrimSpace(h.UploadBucket) == "" {
+		h.emit(r, "storage.presign_put", "object", "", "deny", http.StatusBadRequest, map[string]string{"reason": "invalid_object_key"})
 		writeError(w, http.StatusBadRequest, "invalid_object_key")
 		return
 	}
@@ -105,6 +110,7 @@ func (h Handler) presignUpload(w http.ResponseWriter, r *http.Request) {
 		maxTTL = 15 * time.Minute
 	}
 	if ttl > maxTTL {
+		h.emit(r, "storage.presign_put", "object", key, "deny", http.StatusBadRequest, map[string]string{"reason": "expiry_too_long"})
 		writeError(w, http.StatusBadRequest, "expiry_too_long")
 		return
 	}
@@ -114,11 +120,12 @@ func (h Handler) presignUpload(w http.ResponseWriter, r *http.Request) {
 		ContentType: strings.TrimSpace(in.ContentType), ExpiresIn: ttl,
 	})
 	if err != nil {
+		h.emit(r, "storage.presign_put", "object", key, "failure", outboundHTTPStatus(err), nil)
 		writeOutboundError(w, err)
 		return
 	}
 
-	h.emit(r, "storage.presign_put", "object", "success", map[string]string{
+	h.emit(r, "storage.presign_put", "object", key, "success", http.StatusOK, map[string]string{
 		"bucket":     h.UploadBucket,
 		"object_key": key,
 	})
@@ -156,28 +163,37 @@ func sessionID(r *http.Request) (string, bool) {
 }
 
 func writeOutboundError(w http.ResponseWriter, err error) {
+	status := outboundHTTPStatus(err)
 	var oe *outbound.Error
 	if !errors.As(err, &oe) {
-		writeError(w, http.StatusBadGateway, "upstream_error")
+		writeError(w, status, "upstream_error")
 		return
+	}
+	writeError(w, status, string(oe.Kind))
+}
+
+func outboundHTTPStatus(err error) int {
+	var oe *outbound.Error
+	if !errors.As(err, &oe) {
+		return http.StatusBadGateway
 	}
 	switch oe.Kind {
 	case outbound.ErrBadRequest:
-		writeError(w, http.StatusBadRequest, string(oe.Kind))
+		return http.StatusBadRequest
 	case outbound.ErrUnauthorized:
-		writeError(w, http.StatusUnauthorized, string(oe.Kind))
+		return http.StatusUnauthorized
 	case outbound.ErrForbidden:
-		writeError(w, http.StatusForbidden, string(oe.Kind))
+		return http.StatusForbidden
 	case outbound.ErrNotFound:
-		writeError(w, http.StatusNotFound, string(oe.Kind))
+		return http.StatusNotFound
 	case outbound.ErrConflict:
-		writeError(w, http.StatusConflict, string(oe.Kind))
+		return http.StatusConflict
 	case outbound.ErrRateLimited:
-		writeError(w, http.StatusTooManyRequests, string(oe.Kind))
+		return http.StatusTooManyRequests
 	case outbound.ErrUnavailable:
-		writeError(w, http.StatusServiceUnavailable, string(oe.Kind))
+		return http.StatusServiceUnavailable
 	default:
-		writeError(w, http.StatusBadGateway, string(oe.Kind))
+		return http.StatusBadGateway
 	}
 }
 
@@ -191,13 +207,18 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func (h Handler) emit(r *http.Request, action, target, outcome string, attrs map[string]string) {
+func (h Handler) emit(r *http.Request, action, target, resourceID, outcome string, status int, attrs map[string]string) {
 	if h.Audit == nil {
 		return
 	}
 	e := audit.NewEvent(action, target, outcome)
-	e.CorrelationID = mw.RequestIDFromContext(r.Context())
-	e.TraceID = mw.TraceIDFromContext(r.Context())
+	if s, ok := mw.AuthenticatedSession(r.Context()); ok {
+		e.Actor = s.Subject
+		e.ActorUsername = s.Username
+	}
+	e.ResourceID = resourceID
+	e.HTTPStatus = status
+	mw.EnrichAuditEvent(r, &e)
 	e.Attributes = attrs
 	_ = h.Audit.Append(r.Context(), e)
 }

@@ -47,6 +47,8 @@ type LoginStart struct{ URL string }
 
 type CallbackResult struct {
 	SessionID string
+	Subject   string
+	Username  string
 	ReturnTo  string
 	ExpiresAt time.Time
 }
@@ -126,6 +128,7 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Cal
 		ID:          sessionID,
 		Subject:     result.Identity.Subject,
 		Issuer:      result.Identity.Issuer,
+		Username:    result.Identity.Username,
 		DisplayName: result.Identity.DisplayName,
 		Email:       result.Identity.Email,
 		Roles:       append([]string(nil), result.Identity.Roles...),
@@ -144,7 +147,13 @@ func (s *Service) CompleteCallback(ctx context.Context, state, code string) (Cal
 		_ = s.Sessions.Delete(ctx, sessionID)
 		return CallbackResult{}, err
 	}
-	return CallbackResult{SessionID: sessionID, ReturnTo: flow.ReturnTo, ExpiresAt: expires}, nil
+	return CallbackResult{
+		SessionID: sessionID,
+		Subject:   result.Identity.Subject,
+		Username:  result.Identity.Username,
+		ReturnTo:  flow.ReturnTo,
+		ExpiresAt: expires,
+	}, nil
 }
 
 func (s *Service) Logout(ctx context.Context, sessionID string, global bool) (string, error) {

@@ -8,6 +8,7 @@ import (
 type Identity struct {
 	Subject     string
 	Issuer      string
+	Username    string
 	DisplayName string
 	Email       string
 	Roles       []string

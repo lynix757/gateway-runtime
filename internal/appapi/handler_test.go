@@ -12,6 +12,7 @@ import (
 
 	"gateway-runtime/internal/audit"
 	"gateway-runtime/internal/capability"
+	"gateway-runtime/internal/httpx/middleware"
 	"gateway-runtime/internal/observability"
 	"gateway-runtime/internal/outbound"
 	"gateway-runtime/internal/policy"
@@ -90,6 +91,14 @@ func TestManagedItemRouteRequiresPermission(t *testing.T) {
 	if got.ID != "a-1" {
 		t.Fatalf("item = %+v", got)
 	}
+	events := h.Audit.(*audit.MemorySink).Snapshot()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2: %+v", len(events), events)
+	}
+	e := events[1]
+	if e.Actor != "user-1" || e.Action != "managed-item.read" || e.ResourceID != "a-1" || e.Outcome != "success" || e.HTTPStatus != http.StatusOK {
+		t.Fatalf("unexpected audit result: %+v", e)
+	}
 }
 
 func TestManagedItemRouteDenied(t *testing.T) {
@@ -151,6 +160,58 @@ func TestPresignUploadValidatesScopeAndTTL(t *testing.T) {
 	}
 }
 
+func TestPresignUploadAuditIdentifiesActorClientActionAndOutcome(t *testing.T) {
+	h, sessions := testHandler(t, map[string][]string{"user": {"storage.upload"}})
+	if err := sessions.Put(context.Background(), session.Session{
+		ID: "sid", Subject: "user-1", Username: "alice", Roles: []string{"user"},
+		ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.Storage = &fakeSigner{}
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+	proxy, err := middleware.ParseTrustedProxyCIDRs([]string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := middleware.RequestMetadata(proxy, mux)
+
+	body := `{"object_key":"users/user-1/report.pdf","content_type":"application/pdf"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/storage/upload-url", strings.NewReader(body))
+	req.RemoteAddr = "10.1.2.3:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.10")
+	req.Header.Set("CF-Ray", "8f1234567890abcd-BKK")
+	req.AddCookie(&http.Cookie{Name: "__Host-bff_session", Value: "sid"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	events := h.Audit.(*audit.MemorySink).Snapshot()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2: %+v", len(events), events)
+	}
+	e := events[1]
+	if e.Actor != "user-1" || e.ActorUsername != "alice" {
+		t.Fatalf("actor = %q username = %q", e.Actor, e.ActorUsername)
+	}
+	if e.ClientIP != "203.0.113.10" || e.ClientIPSource != "x-forwarded-for" {
+		t.Fatalf("client ip = %q source = %q", e.ClientIP, e.ClientIPSource)
+	}
+	if e.Action != "storage.presign_put" || e.Target != "object" || e.ResourceID != "users/user-1/report.pdf" {
+		t.Fatalf("unexpected action target resource: %+v", e)
+	}
+	if e.Outcome != "success" || e.HTTPStatus != http.StatusOK || e.OccurredAt.IsZero() {
+		t.Fatalf("unexpected outcome status timestamp: %+v", e)
+	}
+	if e.CFRay != "8f1234567890abcd-BKK" {
+		t.Fatalf("cf ray = %q", e.CFRay)
+	}
+}
+
 func TestPresignUploadRejectsEscapedPrefix(t *testing.T) {
 	h, _ := testHandler(t, map[string][]string{"user": {"storage.upload"}})
 	h.Storage = &fakeSigner{}
@@ -166,6 +227,32 @@ func TestPresignUploadRejectsEscapedPrefix(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	events := h.Audit.(*audit.MemorySink).Snapshot()
+	if len(events) != 2 || events[1].Action != "storage.presign_put" || events[1].Outcome != "deny" || events[1].HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("unexpected audit events: %+v", events)
+	}
+}
+
+func TestPresignUploadFailureIsAudited(t *testing.T) {
+	h, _ := testHandler(t, map[string][]string{"user": {"storage.upload"}})
+	h.Storage = &fakeSigner{err: &outbound.Error{Kind: outbound.ErrUnavailable, StatusCode: http.StatusServiceUnavailable}}
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+	body := `{"object_key":"users/user-1/report.pdf"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/storage/upload-url", strings.NewReader(body))
+	req.AddCookie(&http.Cookie{Name: "__Host-bff_session", Value: "sid"})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	events := h.Audit.(*audit.MemorySink).Snapshot()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2: %+v", len(events), events)
+	}
+	e := events[1]
+	if e.Action != "storage.presign_put" || e.ResourceID != "users/user-1/report.pdf" || e.Outcome != "failure" || e.HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected audit result: %+v", e)
 	}
 }
 

@@ -37,6 +37,7 @@ func (r SessionResolver) Resolve(ctx context.Context, sessionID string) (Context
 
 	return Context{
 		Subject:      s.Subject,
+		Username:     s.Username,
 		DisplayName:  s.DisplayName,
 		Email:        s.Email,
 		Roles:        append([]string(nil), s.Roles...),

@@ -27,18 +27,23 @@ func ParseTrustedProxyCIDRs(values []string) (TrustedProxyConfig, error) {
 }
 
 func ClientIP(r *http.Request, cfg TrustedProxyConfig) string {
+	ip, _ := ClientIdentity(r, cfg)
+	return ip
+}
+
+func ClientIdentity(r *http.Request, cfg TrustedProxyConfig) (string, string) {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
 	remoteIP := net.ParseIP(host)
 	if remoteIP == nil || !isTrusted(remoteIP, cfg.CIDRs) {
-		return host
+		return host, "remote-address"
 	}
 
 	xff := r.Header.Get("X-Forwarded-For")
 	if xff == "" {
-		return host
+		return host, "remote-address"
 	}
 	parts := strings.Split(xff, ",")
 	for i := len(parts) - 1; i >= 0; i-- {
@@ -47,10 +52,10 @@ func ClientIP(r *http.Request, cfg TrustedProxyConfig) string {
 			continue
 		}
 		if !isTrusted(ip, cfg.CIDRs) {
-			return ip.String()
+			return ip.String(), "x-forwarded-for"
 		}
 	}
-	return host
+	return host, "remote-address"
 }
 
 func isTrusted(ip net.IP, cidrs []*net.IPNet) bool {

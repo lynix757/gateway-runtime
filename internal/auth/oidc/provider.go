@@ -124,6 +124,7 @@ func (p *Provider) Exchange(ctx context.Context, code, codeVerifier, redirectURI
 		Identity: auth.Identity{
 			Subject:     claims.Subject,
 			Issuer:      claims.Issuer,
+			Username:    claims.PreferredUsername,
 			DisplayName: displayName,
 			Email:       claims.Email,
 			Roles:       claims.Roles,

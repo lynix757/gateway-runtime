@@ -83,6 +83,7 @@ func NewRouter(basePath string, deps RouterDeps) http.Handler {
 	if deps.AccessLogEnabled {
 		mounted = mw.AccessLog(deps.TrustedProxy, mounted)
 	}
+	mounted = mw.RequestMetadata(deps.TrustedProxy, mounted)
 	mounted = mw.SecurityHeaders(mounted)
 	if deps.TraceEnabled {
 		mounted = mw.TraceContext(mounted)

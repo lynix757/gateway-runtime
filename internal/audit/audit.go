@@ -8,15 +8,21 @@ import (
 )
 
 type Event struct {
-	ID            string
-	OccurredAt    time.Time
-	Actor         string
-	Action        string
-	Target        string
-	Outcome       string
-	CorrelationID string
-	TraceID       string
-	Attributes    map[string]string
+	ID             string
+	OccurredAt     time.Time
+	Actor          string
+	ActorUsername  string
+	ClientIP       string
+	ClientIPSource string
+	CFRay          string
+	Action         string
+	Target         string
+	ResourceID     string
+	Outcome        string
+	HTTPStatus     int
+	CorrelationID  string
+	TraceID        string
+	Attributes     map[string]string
 }
 
 type Sink interface {

@@ -11,6 +11,7 @@ const DefaultTTL = 60 * time.Second
 
 type Context struct {
 	Subject      string   `json:"sub"`
+	Username     string   `json:"preferred_username,omitempty"`
 	DisplayName  string   `json:"display_name,omitempty"`
 	Email        string   `json:"email,omitempty"`
 	Roles        []string `json:"roles,omitempty"`

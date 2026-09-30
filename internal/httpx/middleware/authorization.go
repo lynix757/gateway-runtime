@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -9,6 +10,13 @@ import (
 	"gateway-runtime/internal/policy"
 	"gateway-runtime/internal/session"
 )
+
+type authenticatedSessionKey struct{}
+
+func AuthenticatedSession(ctx context.Context) (session.Session, bool) {
+	s, ok := ctx.Value(authenticatedSessionKey{}).(session.Session)
+	return s, ok
+}
 
 func RequirePermission(permission string, sessions session.Store, evaluator policy.Evaluator, next http.Handler) http.Handler {
 	return RequirePermissionWithAuditCookie(permission, "__Host-bff_session", sessions, evaluator, nil, nil, next)
@@ -22,6 +30,7 @@ func RequirePermissionWithAuditCookie(permission, cookieName string, sessions se
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(cookieName)
 		if err != nil || cookie.Value == "" {
+			emitDecision(r, sink, metrics, "", "", permission, "deny", "unauthenticated", http.StatusUnauthorized)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -29,15 +38,17 @@ func RequirePermissionWithAuditCookie(permission, cookieName string, sessions se
 		s, err := sessions.Get(r.Context(), cookie.Value)
 		if err != nil {
 			if errors.Is(err, session.ErrNotFound) {
+				emitDecision(r, sink, metrics, "", "", permission, "deny", "invalid_session", http.StatusUnauthorized)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 			} else {
+				emitDecision(r, sink, metrics, "", "", permission, "error", "session_store_error", http.StatusServiceUnavailable)
 				http.Error(w, "session store unavailable", http.StatusServiceUnavailable)
 			}
 			return
 		}
 
 		if evaluator == nil {
-			emitDecision(r, sink, metrics, s.Subject, permission, "denied", "policy_unconfigured")
+			emitDecision(r, sink, metrics, s.Subject, s.Username, permission, "deny", "policy_unconfigured", http.StatusForbidden)
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -47,13 +58,13 @@ func RequirePermissionWithAuditCookie(permission, cookieName string, sessions se
 			Roles: append([]string(nil), s.Roles...),
 		}, permission)
 		if err != nil {
-			emitDecision(r, sink, metrics, s.Subject, permission, "error", "policy_error")
+			emitDecision(r, sink, metrics, s.Subject, s.Username, permission, "error", "policy_error", http.StatusServiceUnavailable)
 			http.Error(w, "authorization unavailable", http.StatusServiceUnavailable)
 			return
 		}
 
 		if !allowed {
-			emitDecision(r, sink, metrics, s.Subject, permission, "denied", "permission_denied")
+			emitDecision(r, sink, metrics, s.Subject, s.Username, permission, "deny", "permission_denied", http.StatusForbidden)
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -61,13 +72,19 @@ func RequirePermissionWithAuditCookie(permission, cookieName string, sessions se
 		if metrics != nil {
 			metrics.RecordAuthorization("allowed", permission)
 		}
-		next.ServeHTTP(w, r)
+		emitDecision(r, sink, nil, s.Subject, s.Username, permission, "allow", "authorized", 0)
+		ctx := context.WithValue(r.Context(), authenticatedSessionKey{}, s)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func emitDecision(r *http.Request, sink audit.Sink, metrics *observability.Metrics, actor, permission, outcome, reason string) {
+func emitDecision(r *http.Request, sink audit.Sink, metrics *observability.Metrics, actor, username, permission, outcome, reason string, status int) {
 	if metrics != nil {
-		metrics.RecordAuthorization(outcome, permission)
+		metricOutcome := outcome
+		if outcome == "deny" {
+			metricOutcome = "denied"
+		}
+		metrics.RecordAuthorization(metricOutcome, permission)
 	}
 	if sink == nil {
 		return
@@ -75,8 +92,11 @@ func emitDecision(r *http.Request, sink audit.Sink, metrics *observability.Metri
 
 	e := audit.NewEvent("authorization."+outcome, permission, outcome)
 	e.Actor = actor
-	e.CorrelationID = RequestIDFromContext(r.Context())
-	e.TraceID = TraceIDFromContext(r.Context())
+	e.ActorUsername = username
+	e.HTTPStatus = status
+	EnrichAuditEvent(r, &e)
 	e.Attributes["reason"] = reason
+	e.Attributes["request_method"] = r.Method
+	e.Attributes["request_path"] = r.URL.Path
 	_ = sink.Append(r.Context(), e)
 }

@@ -21,7 +21,24 @@ func TestClientIPTrustsForwardedOnlyFromTrustedProxy(t *testing.T) {
 	untrusted := httptest.NewRequest("GET", "http://example.com", nil)
 	untrusted.RemoteAddr = "192.0.2.55:1234"
 	untrusted.Header.Set("X-Forwarded-For", "203.0.113.10")
+	untrusted.Header.Set("CF-Connecting-IP", "198.51.100.99")
 	if got := ClientIP(untrusted, cfg); got != "192.0.2.55" {
 		t.Fatalf("untrusted proxy client ip = %q", got)
+	}
+}
+
+func TestClientIdentityUsesForwardedForAndIgnoresCloudflareHeader(t *testing.T) {
+	cfg, err := ParseTrustedProxyCIDRs([]string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "http://example.com", nil)
+	req.RemoteAddr = "10.1.2.3:1234"
+	req.Header.Set("CF-Connecting-IP", "203.0.113.10")
+	req.Header.Set("X-Forwarded-For", "198.51.100.20")
+
+	ip, source := ClientIdentity(req, cfg)
+	if ip != "198.51.100.20" || source != "x-forwarded-for" {
+		t.Fatalf("client identity = %q %q", ip, source)
 	}
 }

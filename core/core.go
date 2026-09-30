@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"gateway-runtime/internal/app"
@@ -48,6 +49,8 @@ type Router struct {
 
 func (r *Router) Handle(pattern, permission string, handler http.Handler) {
 	if permission != "" {
+		targetType, _, _ := strings.Cut(permission, ".")
+		handler = mw.BusinessAudit(permission, targetType, r.deps.Audit, handler)
 		handler = mw.RequirePermissionWithAuditCookie(
 			permission,
 			r.deps.SessionCookieName,

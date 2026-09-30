@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"gateway-runtime/internal/audit"
 	"gateway-runtime/internal/session"
 	"gateway-runtime/internal/usercontext"
 )
@@ -31,11 +32,13 @@ func (failingSessionStore) Delete(context.Context, string) error {
 }
 
 func TestLoginDependencyFailureReturns503(t *testing.T) {
+	sink := &audit.MemorySink{}
 	h := Handler{
 		Service: &Service{
 			Provider: fakeProviderForHTTP{},
 			Flows:    failingFlowStore{},
 		},
+		Audit: sink,
 	}
 	req := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
 	rec := httptest.NewRecorder()
@@ -45,14 +48,20 @@ func TestLoginDependencyFailureReturns503(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
+	events := sink.Snapshot()
+	if len(events) != 1 || events[0].Action != "auth.login" || events[0].Outcome != "error" || events[0].HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected audit events: %+v", events)
+	}
 }
 
 func TestLoginInvalidReturnToReturns400(t *testing.T) {
+	sink := &audit.MemorySink{}
 	h := Handler{
 		Service: &Service{
 			Provider: fakeProviderForHTTP{},
 			Flows:    NewMemoryFlowStore(),
 		},
+		Audit: sink,
 	}
 	req := httptest.NewRequest(http.MethodGet, "/auth/login?return_to=https://evil.example", nil)
 	rec := httptest.NewRecorder()
@@ -61,6 +70,23 @@ func TestLoginInvalidReturnToReturns400(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	events := sink.Snapshot()
+	if len(events) != 1 || events[0].Action != "auth.login" || events[0].Outcome != "deny" || events[0].HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("unexpected audit events: %+v", events)
+	}
+}
+
+func TestInvalidCallbackIsAuditedAsDenied(t *testing.T) {
+	sink := &audit.MemorySink{}
+	h := Handler{Service: &Service{}, Audit: sink}
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback", nil)
+	rec := httptest.NewRecorder()
+	h.callback(rec, req)
+
+	events := sink.Snapshot()
+	if len(events) != 1 || events[0].Action != "auth.login" || events[0].Outcome != "deny" || events[0].HTTPStatus != http.StatusUnauthorized {
+		t.Fatalf("unexpected audit events: %+v", events)
 	}
 }
 

@@ -33,7 +33,7 @@ func (f *fakeProvider) Exchange(_ context.Context, code, verifier, redirectURI, 
 		return ExchangeResult{}, ErrFlowNotFound
 	}
 	return ExchangeResult{
-		Identity: Identity{Subject: "user-1", Issuer: "https://idp.example"},
+		Identity: Identity{Subject: "user-1", Issuer: "https://idp.example", Username: "alice"},
 		Tokens: TokenSet{
 			AccessToken:  "access",
 			RefreshToken: "refresh",
@@ -79,8 +79,12 @@ func TestLoginCallbackCreatesServerSideSessionAndTokens(t *testing.T) {
 	if result.ReturnTo != "/dashboard" {
 		t.Fatalf("return_to = %q", result.ReturnTo)
 	}
-	if _, err := sessions.Get(context.Background(), result.SessionID); err != nil {
+	gotSession, err := sessions.Get(context.Background(), result.SessionID)
+	if err != nil {
 		t.Fatalf("session missing: %v", err)
+	}
+	if gotSession.Subject != "user-1" || gotSession.Username != "alice" {
+		t.Fatalf("session identity = %+v", gotSession)
 	}
 	gotTokens, err := tokens.Get(context.Background(), result.SessionID)
 	if err != nil {
